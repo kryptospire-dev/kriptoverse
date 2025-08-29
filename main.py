@@ -279,7 +279,7 @@ You have already completed all steps!
 `https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user_data.get('referral_code')}`
 
 **📊 Your Referral Stats:**
-• Total Successful Referrals: **{referral_stats['total_referrals']/2}**
+• Total Successful Referrals: **{int(referral_stats['total_referrals']/2)}**
 • Total Referral Rewards: **{referral_stats['total_referrals']} MNTC**
 • Total Recieved Referral Rewards: **{referral_stats['total_rewards']} MNTC**
 
@@ -1278,4 +1278,5 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
