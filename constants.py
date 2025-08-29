@@ -549,8 +549,9 @@ REFERRAL_STATS_TEMPLATE = """
 🎁 *Your Referral Statistics*
 
 **📊 Referral Performance:**
-• Total Successful Referrals: **{total_referrals}**
-• Total Referral Rewards: **{total_rewards} MNTC**
+• Total Successful Referrals: **{int(total_referrals/2)}**
+• Total Referral Rewards: **{total_referrals} MNTC**
+• Total Recieved Referral Rewards: **{total_rewards} MNTC**
 
 **🔗 Your Referral Link:**
 `https://t.me/{bot_username}?start={referral_code}`
@@ -681,3 +682,4 @@ STATUS_ICONS = {
     'paid': '✅ Paid',
     'not_completed_reward': '❌ Not Completed'
 }
+
