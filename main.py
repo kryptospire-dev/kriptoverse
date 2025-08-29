@@ -264,7 +264,7 @@ class MinatiVaultBot:
 
         keyboard = [
             [InlineKeyboardButton(f"{EMOJIS['stats']} View Status", callback_data=CALLBACK_DATA['show_status'])],
-            [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
+            # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
         ]
 
@@ -1279,6 +1279,7 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
 
