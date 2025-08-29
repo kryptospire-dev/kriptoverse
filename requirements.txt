@@ -1,0 +1,29 @@
+# Core Dependencies
+python-telegram-bot>=20.8
+firebase-admin>=6.5.0
+python-dotenv>=1.0.1
+
+# HTTP and Security
+requests>=2.32.3
+cryptography>=42.0.8
+urllib3>=2.2.2
+
+# Image Processing (optional)
+Pillow>=10.4.0
+
+# Data Validation
+pydantic>=2.8.2
+
+# Date/Time utilities
+python-dateutil>=2.9.0
+pytz>=2024.1
+
+# JSON Web Tokens
+PyJWT>=2.9.0
+
+# Async HTTP
+aiohttp>=3.10.3
+httpx>=0.27.0
+
+# Caching and Rate Limiting
+cachetools>=5.4.0
