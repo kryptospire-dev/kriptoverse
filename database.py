@@ -6,6 +6,8 @@ import config
 import os
 import json
 import logging
+import time
+import random
 from constants import (
     FIREBASE_ENV_MAPPING,
     FIREBASE_DEFAULTS,
@@ -32,6 +34,7 @@ class Database:
             cred = self._get_credentials()
             if cred is None:
                 raise Exception("Failed to get Firebase credentials")
+
             firebase_admin.initialize_app(cred, {
                 'projectId': config.FIREBASE_PROJECT_ID
             })
@@ -41,8 +44,74 @@ class Database:
         self.users_collection = self.db.collection(DB_COLLECTIONS['users'])
         self.stats_collection = self.db.collection(DB_COLLECTIONS['bot_stats'])
 
+        # Enhanced error handling properties
+        self._connection_failures = 0
+        self._last_failure_time = None
+        self._circuit_breaker_open = False
+
         # Initialize bot stats if not exists
         self._init_bot_stats()
+
+    def _exponential_backoff_delay(self, attempt: int, base_delay: float = 0.1) -> float:
+        """Calculate exponential backoff delay with jitter"""
+        delay = min(base_delay * (2 ** attempt), 10.0)  # Cap at 10 seconds
+        jitter = random.uniform(0.1, 0.3) * delay
+        return delay + jitter
+
+    def _check_circuit_breaker(self) -> bool:
+        """Check if circuit breaker should be open"""
+        if not self._circuit_breaker_open:
+            return False
+
+        # Reset circuit breaker after 30 seconds
+        if (self._last_failure_time and
+            time.time() - self._last_failure_time > 30):
+            self._circuit_breaker_open = False
+            self._connection_failures = 0
+            logger.info("Circuit breaker reset - allowing database operations")
+            return False
+
+        return True
+
+    def _record_failure(self):
+        """Record a database operation failure"""
+        self._connection_failures += 1
+        self._last_failure_time = time.time()
+
+        # Open circuit breaker after 5 consecutive failures
+        if self._connection_failures >= 5:
+            self._circuit_breaker_open = True
+            logger.error(f"Circuit breaker opened after {self._connection_failures} failures")
+
+    def _record_success(self):
+        """Record a successful database operation"""
+        self._connection_failures = 0
+        self._last_failure_time = None
+        if self._circuit_breaker_open:
+            self._circuit_breaker_open = False
+            logger.info("Circuit breaker closed - database operations restored")
+
+    def health_check(self) -> Dict[str, Any]:
+        """Perform database health check"""
+        try:
+            # Simple read operation to test connection
+            test_doc = self.stats_collection.document('health_check').get()
+
+            return {
+                'status': 'healthy',
+                'connection_failures': self._connection_failures,
+                'circuit_breaker_open': self._circuit_breaker_open,
+                'last_failure_time': self._last_failure_time,
+                'timestamp': datetime.now()
+            }
+        except Exception as e:
+            return {
+                'status': 'unhealthy',
+                'error': str(e),
+                'connection_failures': self._connection_failures,
+                'circuit_breaker_open': self._circuit_breaker_open,
+                'timestamp': datetime.now()
+            }
 
     def _get_credentials(self):
         """Get Firebase credentials with comprehensive error handling and priority order"""
@@ -53,7 +122,6 @@ class Database:
             if os.path.exists(config.FIREBASE_SERVICE_ACCOUNT_PATH):
                 try:
                     logger.info(f"Using service account file: {config.FIREBASE_SERVICE_ACCOUNT_PATH}")
-
                     with open(config.FIREBASE_SERVICE_ACCOUNT_PATH, 'r') as f:
                         service_account_info = json.load(f)
 
@@ -62,7 +130,6 @@ class Database:
                         return credentials.Certificate(service_account_info)
                     else:
                         logger.warning("Service account file validation failed")
-
                 except Exception as e:
                     logger.error(f"Error using service account file: {e}")
             else:
@@ -73,15 +140,12 @@ class Database:
         if service_account_json:
             try:
                 logger.info("Attempting to use FIREBASE_SERVICE_ACCOUNT_JSON...")
-
                 # Handle different JSON formats
                 service_account_info = self._parse_service_account_json(service_account_json)
-
                 if service_account_info and self._validate_service_account(service_account_info):
                     return credentials.Certificate(service_account_info)
                 else:
                     logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON validation failed")
-
             except Exception as e:
                 logger.error(f"Error processing FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
 
@@ -150,6 +214,7 @@ class Database:
         # Check required fields
         required_fields = ['type', 'project_id', 'private_key', 'client_email']
         missing_fields = [field for field in required_fields if not service_account_info.get(field)]
+
         if missing_fields:
             logger.error(f"Missing required fields: {missing_fields}")
             return False
@@ -175,6 +240,7 @@ class Database:
         # Validate project ID
         expected_project = config.FIREBASE_PROJECT_ID
         actual_project = service_account_info.get('project_id')
+
         if expected_project and actual_project != expected_project:
             logger.warning(f"Project ID mismatch: expected {expected_project}, got {actual_project}")
 
@@ -221,49 +287,112 @@ class Database:
         except Exception as e:
             logger.error(f"Error initializing bot stats: {e}")
 
+    def get_user_with_retry(self, user_id: int, max_retries: int = 3) -> Optional[Dict]:
+        """Enhanced get_user with retry logic and circuit breaker"""
+        if self._check_circuit_breaker():
+            logger.warning(f"Circuit breaker open - skipping get_user for {user_id}")
+            return None
+
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Getting user {user_id}, attempt {attempt + 1}")
+                user_doc = self.users_collection.document(str(user_id)).get()
+
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    user_data['_id'] = user_id
+                    self._record_success()
+                    logger.debug(f"Successfully retrieved user {user_id}")
+                    return user_data
+                else:
+                    # User doesn't exist - this is not an error
+                    self._record_success()
+                    logger.debug(f"User {user_id} does not exist")
+                    return None
+
+            except Exception as e:
+                logger.warning(f"get_user attempt {attempt + 1} failed for user {user_id}: {e}")
+                self._record_failure()
+
+                if attempt < max_retries - 1:
+                    delay = self._exponential_backoff_delay(attempt)
+                    logger.info(f"Retrying get_user in {delay:.2f} seconds")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"All get_user attempts failed for user {user_id}")
+                    return None
+
+        return None
+
     def get_user(self, user_id: int) -> Optional[Dict]:
-        """Get user data from Firestore"""
-        try:
-            user_doc = self.users_collection.document(str(user_id)).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                user_data['_id'] = user_id
-                return user_data
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user {user_id}: {e}")
-            return None
+        """Get user data from Firestore - compatibility method"""
+        return self.get_user_with_retry(user_id)
+
+    def create_user_with_retry(self, user_id: int, username: str, first_name: str, referred_by: str = None, max_retries: int = 3) -> bool:
+        """Enhanced create_user with retry logic and better error handling"""
+        if self._check_circuit_breaker():
+            logger.warning(f"Circuit breaker open - skipping create_user for {user_id}")
+            return False
+
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Creating user {user_id}, attempt {attempt + 1}")
+
+                # First check if user already exists to avoid conflicts
+                existing_check = self.users_collection.document(str(user_id)).get()
+                if existing_check.exists:
+                    logger.info(f"User {user_id} already exists - skipping creation")
+                    self._record_success()
+                    return True  # User exists, so "creation" is successful
+
+                user_data = DEFAULT_USER_DATA.copy()
+
+                # Generate unique referral code for new user
+                referral_code = self._generate_unique_referral_code()
+
+                user_data.update({
+                    "user_id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "referral_code": referral_code,
+                    "referred_by": referred_by,
+                    "is_referred": bool(referred_by),
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
+                })
+
+                # Create the user
+                self.users_collection.document(str(user_id)).set(user_data)
+
+                self._update_stats('user_created')
+                self._record_success()
+                logger.info(f"User {user_id} created successfully with referral code: {referral_code}")
+                if referred_by:
+                    logger.info(f"User {user_id} was referred by: {referred_by}")
+                return True
+
+            except Exception as e:
+                logger.warning(f"create_user attempt {attempt + 1} failed for user {user_id}: {e}")
+                self._record_failure()
+
+                # Check if it's a "user already exists" type error
+                if "already exists" in str(e).lower() or "conflict" in str(e).lower():
+                    logger.info(f"User {user_id} creation conflict - user likely exists")
+                    return True  # Treat as success since user exists
+
+                if attempt < max_retries - 1:
+                    delay = self._exponential_backoff_delay(attempt)
+                    logger.info(f"Retrying create_user in {delay:.2f} seconds")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"All create_user attempts failed for user {user_id}")
+                    return False
+
+        return False
 
     def create_user(self, user_id: int, username: str, first_name: str, referred_by: str = None) -> bool:
-        """Create new user in Firestore with referral support"""
-        try:
-            user_data = DEFAULT_USER_DATA.copy()
-
-            # Generate unique referral code for new user
-            referral_code = self._generate_unique_referral_code()
-
-            user_data.update({
-                "user_id": user_id,
-                "username": username,
-                "first_name": first_name,
-                "referral_code": referral_code,
-                "referred_by": referred_by,
-                "is_referred": bool(referred_by),
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            })
-
-            self.users_collection.document(str(user_id)).set(user_data)
-            self._update_stats('user_created')
-
-            logger.info(f"User {user_id} created successfully with referral code: {referral_code}")
-            if referred_by:
-                logger.info(f"User {user_id} was referred by: {referred_by}")
-
-            return True
-        except Exception as e:
-            logger.error(f"Error creating user {user_id}: {e}")
-            return False
+        """Create new user in Firestore with referral support - compatibility method"""
+        return self.create_user_with_retry(user_id, username, first_name, referred_by)
 
     def _generate_unique_referral_code(self) -> str:
         """Generate a unique referral code that doesn't exist in database"""
@@ -315,7 +444,7 @@ class Database:
                 self._update_stats('user_completed')
 
                 # Calculate and store MNTC earned
-                user_data = self.get_user(user_id)
+                user_data = self.get_user_with_retry(user_id)
                 if user_data:
                     mntc_earned = self._calculate_and_store_mntc_earned(user_data)
 
@@ -325,6 +454,7 @@ class Database:
 
             logger.info(f"User {user_id} step {step} updated: {completed}")
             return True
+
         except Exception as e:
             logger.error(f"Error updating user {user_id} step {step}: {e}")
             return False
@@ -374,18 +504,104 @@ class Database:
 
                 # Update referrer's referral count
                 current_referrals = referrer.get('referral_stats', {}).get('total_referrals', 0)
+
                 update_data = {
                     "referral_stats.total_referrals": current_referrals + 1,
                     "updated_at": datetime.now()
                 }
 
                 self.users_collection.document(str(referrer_id)).update(update_data)
+
                 logger.info(f"Updated referral stats for user {referrer_id}. Total referrals: {current_referrals + 1}")
                 return referrer_id
 
         except Exception as e:
             logger.error(f"Error handling referral completion for {referrer_code}: {e}")
             return None
+
+    def save_social_username(self, user_id: int, platform: str, username: str) -> bool:
+        """Save user's social media username"""
+        try:
+            update_data = {
+                f"social_usernames.{platform}": username,
+                f"verification_status.{platform}": True,
+                "updated_at": datetime.now()
+            }
+
+            self.users_collection.document(str(user_id)).update(update_data)
+            logger.info(f"User {user_id} {platform} username saved: {username}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving {platform} username for user {user_id}: {e}")
+            return False
+
+    def save_bep20_address(self, user_id: int, address: str) -> bool:
+        """Save user's BEP20 address"""
+        try:
+            update_data = {
+                "bep20_address": address,
+                "updated_at": datetime.now()
+            }
+
+            self.users_collection.document(str(user_id)).update(update_data)
+            logger.info(f"User {user_id} BEP20 address saved")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving BEP20 address for user {user_id}: {e}")
+            return False
+
+    def add_screenshot(self, user_id: int, file_id: str, file_name: str) -> bool:
+        """Add screenshot to user's record"""
+        try:
+            screenshot_data = {
+                "file_id": file_id,
+                "file_name": file_name,
+                "uploaded_at": datetime.now()
+            }
+
+            # Use array union to add new screenshot
+            self.users_collection.document(str(user_id)).update({
+                "screenshots": firestore.ArrayUnion([screenshot_data]),
+                "updated_at": datetime.now()
+            })
+
+            logger.info(f"Screenshot added for user {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding screenshot for user {user_id}: {e}")
+            return False
+
+    def get_user_stats(self) -> Dict:
+        """Get overall bot statistics"""
+        try:
+            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
+            if stats_doc.exists:
+                return stats_doc.to_dict()
+            else:
+                return DEFAULT_BOT_STATS.copy()
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return DEFAULT_BOT_STATS.copy()
+
+    def _update_stats(self, action: str):
+        """Update bot statistics"""
+        try:
+            stats_ref = self.stats_collection.document(DB_COLLECTIONS['main_stats'])
+            if action == 'user_created':
+                stats_ref.update({
+                    'total_users': firestore.Increment(1),
+                    'updated_at': datetime.now()
+                })
+            elif action == 'user_completed':
+                stats_ref.update({
+                    'completed_users': firestore.Increment(1),
+                    'updated_at': datetime.now()
+                })
+        except Exception as e:
+            logger.error(f"Error updating stats for action {action}: {e}")
 
     def update_reward_status(self, user_id: int, status: str) -> bool:
         """Update user's reward payment status (admin function)"""
@@ -399,6 +615,7 @@ class Database:
             self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"Updated reward status for user {user_id}: {status}")
             return True
+
         except Exception as e:
             logger.error(f"Error updating reward status for user {user_id}: {e}")
             return False
@@ -425,6 +642,7 @@ class Database:
                 })
 
             return pending_users
+
         except Exception as e:
             logger.error(f"Error getting pending rewards: {e}")
             return []
@@ -451,6 +669,7 @@ class Database:
                 })
 
             return paid_users
+
         except Exception as e:
             logger.error(f"Error getting paid rewards: {e}")
             return []
@@ -496,97 +715,17 @@ class Database:
                 'total_mntc_paid': total_mntc_paid,
                 'total_mntc_issued': total_mntc_pending + total_mntc_paid
             }
+
         except Exception as e:
             logger.error(f"Error getting reward summary: {e}")
             return {}
-
-    def save_social_username(self, user_id: int, platform: str, username: str) -> bool:
-        """Save user's social media username"""
-        try:
-            update_data = {
-                f"social_usernames.{platform}": username,
-                f"verification_status.{platform}": True,
-                "updated_at": datetime.now()
-            }
-
-            self.users_collection.document(str(user_id)).update(update_data)
-            logger.info(f"User {user_id} {platform} username saved: {username}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving {platform} username for user {user_id}: {e}")
-            return False
-
-    def save_bep20_address(self, user_id: int, address: str) -> bool:
-        """Save user's BEP20 address"""
-        try:
-            update_data = {
-                "bep20_address": address,
-                "updated_at": datetime.now()
-            }
-
-            self.users_collection.document(str(user_id)).update(update_data)
-            logger.info(f"User {user_id} BEP20 address saved")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving BEP20 address for user {user_id}: {e}")
-            return False
-
-    def add_screenshot(self, user_id: int, file_id: str, file_name: str) -> bool:
-        """Add screenshot to user's record"""
-        try:
-            screenshot_data = {
-                "file_id": file_id,
-                "file_name": file_name,
-                "uploaded_at": datetime.now()
-            }
-
-            # Use array union to add new screenshot
-            self.users_collection.document(str(user_id)).update({
-                "screenshots": firestore.ArrayUnion([screenshot_data]),
-                "updated_at": datetime.now()
-            })
-
-            logger.info(f"Screenshot added for user {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error adding screenshot for user {user_id}: {e}")
-            return False
-
-    def get_user_stats(self) -> Dict:
-        """Get overall bot statistics"""
-        try:
-            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
-            if stats_doc.exists:
-                return stats_doc.to_dict()
-            else:
-                return DEFAULT_BOT_STATS.copy()
-        except Exception as e:
-            logger.error(f"Error getting stats: {e}")
-            return DEFAULT_BOT_STATS.copy()
-
-    def _update_stats(self, action: str):
-        """Update bot statistics"""
-        try:
-            stats_ref = self.stats_collection.document(DB_COLLECTIONS['main_stats'])
-            if action == 'user_created':
-                stats_ref.update({
-                    'total_users': firestore.Increment(1),
-                    'updated_at': datetime.now()
-                })
-            elif action == 'user_completed':
-                stats_ref.update({
-                    'completed_users': firestore.Increment(1),
-                    'updated_at': datetime.now()
-                })
-        except Exception as e:
-            logger.error(f"Error updating stats for action {action}: {e}")
 
     def reset_user_progress(self, user_id: int, keep_referral_data: bool = True) -> bool:
         """Reset user's progress completely with option to keep referral data"""
         try:
             if keep_referral_data:
                 # Get current referral data before reset
-                current_user = self.get_user(user_id)
+                current_user = self.get_user_with_retry(user_id)
                 if current_user:
                     reset_data = DEFAULT_USER_DATA.copy()
                     # Preserve referral information
@@ -612,6 +751,7 @@ class Database:
             self.users_collection.document(str(user_id)).update(reset_data)
             logger.info(f"User {user_id} progress reset (keep_referral_data: {keep_referral_data})")
             return True
+
         except Exception as e:
             logger.error(f"Error resetting user {user_id} progress: {e}")
             return False
@@ -627,6 +767,7 @@ class Database:
             self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"Updated referral rewards for user {user_id}: {total_rewards} MNTC")
             return True
+
         except Exception as e:
             logger.error(f"Error updating referral rewards for user {user_id}: {e}")
             return False
@@ -634,7 +775,7 @@ class Database:
     def get_referral_stats(self, user_id: int) -> Dict:
         """Get user's referral statistics"""
         try:
-            user_data = self.get_user(user_id)
+            user_data = self.get_user_with_retry(user_id)
             if user_data:
                 return {
                     "referral_code": user_data.get('referral_code'),
@@ -644,6 +785,7 @@ class Database:
                     "referred_by": user_data.get('referred_by')
                 }
             return None
+
         except Exception as e:
             logger.error(f"Error getting referral stats for user {user_id}: {e}")
             return None
@@ -653,13 +795,17 @@ class Database:
         try:
             if limit is None:
                 limit = RATE_LIMITS['max_users_query']
+
             users = []
             docs = self.users_collection.limit(limit).stream()
+
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
                 users.append(user_data)
+
             return users
+
         except Exception as e:
             logger.error(f"Error getting all users: {e}")
             return []
