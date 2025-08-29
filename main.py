@@ -641,7 +641,7 @@ Thank you for using Minati Vault Bot! 🚀
 *Need Changes?* Contact support for assistance
 """
             keyboard = [
-                [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
+                # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
                 [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
             ]
         else:
@@ -666,7 +666,7 @@ Thank you for using Minati Vault Bot! 🚀
                 MESSAGE_TEMPLATES['all_completed'] if current_step > TOTAL_STEPS else f"Continue with Step {current_step}"
             )
             keyboard = [
-                [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
+                # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
             ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -902,7 +902,7 @@ Thank you for using Minati Vault Bot! 🚀
         )
 
         keyboard = [
-            [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
+            # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])],
             [InlineKeyboardButton(f"{EMOJIS['coinmarketcap']} CoinMarketCap", url=SOCIAL_LINKS['coinmarketcap'])],
         ]
@@ -1279,6 +1279,7 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
 
