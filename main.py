@@ -629,8 +629,9 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Referral Information:*
 • Status: {STATUS_ICONS['referred'] if is_referred else STATUS_ICONS['normal']}
-• Your Referrals: {referral_stats['total_referrals']}
-• Referral Rewards: {referral_stats['total_rewards']} MNTC
+• Your Referrals: {int(referral_stats['total_referrals']/2)}
+• Total Referral Rewards: {referral_stats['total_referrals']} MNTC
+• Total Recieved Referral Rewards: **{referral_stats['total_rewards']} MNTC**
 
 *Reward Information:*
 • MNTC Earned: {reward_info.get('mntc_earned', 0)} MNTC
@@ -1278,5 +1279,6 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
