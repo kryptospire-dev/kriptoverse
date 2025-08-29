@@ -24,12 +24,12 @@ SOCIAL_LINKS = {
 
 # Referral System Constants
 REFERRAL_CONFIG = {
-    'bot_username': 'minatiVault_bot',  # Update this with your actual bot username
+    'bot_username': 'minatiVault_bot', # Update this with your actual bot username
     'referral_code_length': 8,
     'referral_code_prefix': 'REF',
-    'normal_reward': 5,  # MNTC for normal users
-    'referred_reward': 4,  # MNTC for referred users
-    'referrer_bonus': 1,  # MNTC bonus for referrers (you'll update manually)
+    'normal_reward': 5, # MNTC for normal users
+    'referred_reward': 4, # MNTC for referred users
+    'referrer_bonus': 2, # MNTC bonus for referrers (you'll update manually) - UPDATED FROM 1 TO 2
 }
 
 def generate_referral_code():
@@ -49,7 +49,7 @@ You have successfully completed all verification steps!
 `https://t.me/{bot_username}?start={referral_code}`
 
 **💰 Referral Rewards:**
-• You get **+1 MNTC** for each successful referral
+• You get **+2 MNTC** for each successful referral
 
 **📊 Your Referral Stats:**
 • Total Successful Referrals: **{total_referrals}**
@@ -122,7 +122,7 @@ Our team will review your submission and contact you soon!
 `https://t.me/{bot_username}?start={referral_code}`
 
 **💰 Referral Rewards:**
-• You get **+1 MNTC** for each successful referral
+• You get **+2 MNTC** for each successful referral
 
 Share your referral link with friends to earn more rewards! 🚀
 
@@ -169,15 +169,10 @@ Let's start! 🎯
 # UPDATED STEPS with properly formatted Twitter step
 STEPS = {
     1: "📥 Please download and review the Minati Vault app first.\n\n🔗 **Download Link:** [Minati Vault App](https://play.google.com/store/apps/details?id=com.app.minati_wallet)\n\nAfter downloading and reviewing, click the button below.",
-
     2: "🐦 **Twitter Tasks:**\n\n1. Follow us: [@minatifi](https://x.com/minatifi?t=wD6ywZfQ1fRdAvHW7x2Txw&s=08)\n2. Like our latest post\n3. Retweet with comment\n\n📝 **Send your Twitter username** (without @) after completing all tasks.",
-
     3: "📸 **Instagram Tasks:**\n\n1. Follow us: [@minativerse_edtech](https://www.instagram.com/minativerse_edtech?igsh=MXE4cWx5ZjZydzUxZg==)\n2. Like our latest post\n3. Share to your story (optional)\n\n📝 **Send your Instagram username** (without @) after completing all tasks.",
-
     4: "📊 **CoinMarketCap Tasks:**\n\n1. Visit our page: [CoinMarketCap](https://coinmarketcap.com/currencies/minati-coin/)\n2. Follow our project\n3. Add to your watchlist\n\n📝 **Send your CoinMarketCap User ID** after completing all tasks.",
-
     5: "🏦 **BEP20 Address Submission:**\n\nPlease send your Minati Vault BEP20 address for rewards.\n\n⚠️ **Important:** Make sure it's a valid BEP20 address starting with 0x",
-
     6: "🎉 **Final Verification:**\n\nReview your information and confirm all tasks are completed.\n\n📞 **Support:** [Contact Support](https://t.me/Minatirewards)"
 }
 
@@ -210,20 +205,27 @@ DEFAULT_USER_DATA = {
         "coinmarketcap": False
     },
     # Referral System Fields
-    "referral_code": None,  # User's unique referral code
-    "referred_by": None,    # Who referred this user (referral_code of referrer)
+    "referral_code": None, # User's unique referral code
+    "referred_by": None, # Who referred this user (referral_code of referrer)
     "referral_stats": {
-        "total_referrals": 0,      # Number of successful referrals
-        "total_rewards": 0         # Total MNTC earned through referrals (manual update)
+        "total_referrals": 0, # Number of successful referrals
+        "total_rewards": 0 # Total MNTC earned through referrals (manual update)
     },
-    "is_referred": False,   # Whether this user was referred by someone
+    "is_referred": False, # Whether this user was referred by someone
     # NEW: Reward tracking for admin
     "reward_info": {
-        "mntc_earned": 0,           # MNTC earned after completion
-        "reward_type": None,        # "normal" or "referred"
-        "completion_date": None,    # When user completed all steps
-        "reward_status": "not_completed"  # "not_completed", "pending", "paid"
+        "mntc_earned": 0, # MNTC earned after completion
+        "reward_type": None, # "normal" or "referred"
+        "completion_date": None, # When user completed all steps
+        "reward_status": "not_completed" # "not_completed", "pending", "paid"
     }
+}
+
+# DEFAULT BOT STATS
+DEFAULT_BOT_STATS = {
+    "total_users": 0,
+    "completed_users": 0,
+    "completion_rate": 0
 }
 
 # Validation Constants
@@ -350,13 +352,6 @@ FIREBASE_DEFAULTS = {
 # Required Firebase Environment Variables
 FIREBASE_REQUIRED_VARS = ['type', 'project_id', 'private_key', 'client_email']
 
-# Bot Statistics Default Values
-DEFAULT_BOT_STATS = {
-    'total_users': 0,
-    'completed_users': 0,
-    'completion_rate': 0
-}
-
 # User ID Validation Limits
 USER_ID_LIMITS = {
     'min_value': 1000,
@@ -402,7 +397,7 @@ MESSAGE_TEMPLATES = {
     'referral_not_found': "❌ Referral code not found. Please check and try again."
 }
 
-# Help Text Templates - UPDATED with consistent Twitter instructions
+# Help Text Templates - UPDATED with consistent referral bonus
 HELP_TEMPLATES = {
     'main_help': """
 🆘 *Minati Vault Bot Help*
@@ -420,7 +415,7 @@ HELP_TEMPLATES = {
 🔐 Address validation for BEP20 wallet
 
 *Referral System:*
-💰 Earn +1 MNTC for each successful referral
+💰 Earn +2 MNTC for each successful referral
 🎁 Share your referral link after completing all steps
 
 *Need Personal Assistance?*
@@ -549,7 +544,7 @@ STATS_TEMPLATE = """
 Last updated: {}
 """
 
-# Referral Statistics Template
+# Referral Statistics Template - UPDATED with +2 MNTC
 REFERRAL_STATS_TEMPLATE = """
 🎁 *Your Referral Statistics*
 
@@ -562,7 +557,7 @@ REFERRAL_STATS_TEMPLATE = """
 
 **💰 How It Works:**
 • Share your link with friends
-• You earn **+1 MNTC** for each referral *(updated manually by admin)*
+• You earn **+2 MNTC** for each referral *(updated manually by admin)*
 
 **📈 Keep sharing to earn more rewards!**
 
