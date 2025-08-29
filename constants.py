@@ -558,7 +558,7 @@ REFERRAL_STATS_TEMPLATE = """
 
 **💰 How It Works:**
 • Share your link with friends
-• You earn **+2 MNTC** for each referral *(updated manually by admin)*
+• You earn **+2 MNTC** for each referral 
 
 **📈 Keep sharing to earn more rewards!**
 
@@ -682,4 +682,5 @@ STATUS_ICONS = {
     'paid': '✅ Paid',
     'not_completed_reward': '❌ Not Completed'
 }
+
 
