@@ -279,9 +279,9 @@ You have already completed all steps!
 `https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user_data.get('referral_code')}`
 
 **📊 Your Referral Stats:**
-• Total Successful Referrals: **{int(referral_stats['total_referrals']/2)}**
-• Total Referral Rewards: **{referral_stats['total_referrals']} MNTC**
-• Total Recieved Referral Rewards: **{referral_stats['total_rewards']} MNTC**
+• Total Successful Referrals: **{referral_stats['total_referrals']}**
+• Total Referral Rewards: **{referral_stats['total_referrals']*2} MNTC**
+• Total Recieved Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
 
 Share your referral link to earn more rewards! 💰
 
@@ -629,9 +629,9 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Referral Information:*
 • Status: {STATUS_ICONS['referred'] if is_referred else STATUS_ICONS['normal']}
-• Your Referrals: {int(referral_stats['total_referrals']/2)}
-• Total Referral Rewards: {referral_stats['total_referrals']} MNTC
-• Total Recieved Referral Rewards: **{referral_stats['total_rewards']} MNTC**
+• Your Referrals: {int(referral_stats['total_referrals'])}
+• Total Referral Rewards: {referral_stats['total_referrals']*2} MNTC
+• Total Recieved Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
 
 *Reward Information:*
 • MNTC Earned: {reward_info.get('mntc_earned', 0)} MNTC
@@ -1279,6 +1279,7 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
 
