@@ -94,7 +94,7 @@ You have successfully completed all steps!
 Our team will review your submission and contact you soon!
 
 **🎁 Start Earning More! Get Your Referral Link:**
-Use /referral command to get your own referral link and start earning bonuses!
+Use /start command to get your own referral link and start earning bonuses!
 
 📞 **Support:** @Minatirewards
 🌐 **Website:** {website}
@@ -407,7 +407,6 @@ HELP_TEMPLATES = {
 • /status - Check your current progress
 • /help - Show this help message
 • /stats - Bot statistics
-• /referral - Get your referral link and stats
 
 *Verification Process:*
 ✅ Username collection for Twitter, Instagram & CoinMarketCap
@@ -486,7 +485,6 @@ Please send your BEP20 (Binance Smart Chain) wallet address.
 • /status - Check progress
 • /help - Show help
 • /stats - Bot statistics
-• /referral - Referral link & stats
 
 *Support:* @Minatirewards
 *Follow:* @Minativerseofficial
