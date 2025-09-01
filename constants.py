@@ -406,7 +406,6 @@ HELP_TEMPLATES = {
 • /start - Start or restart the bot
 • /status - Check your current progress
 • /help - Show this help message
-• /reset - Reset your progress completely
 • /stats - Bot statistics
 • /referral - Get your referral link and stats
 
@@ -487,7 +486,6 @@ Please send your BEP20 (Binance Smart Chain) wallet address.
 • /status - Check progress
 • /help - Show help
 • /stats - Bot statistics
-• /reset - Reset progress
 • /referral - Referral link & stats
 
 *Support:* @Minatirewards
