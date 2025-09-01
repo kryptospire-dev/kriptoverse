@@ -27,7 +27,7 @@ REFERRAL_CONFIG = {
     'bot_username': 'minatiVault_bot', # Update this with your actual bot username
     'referral_code_length': 8,
     'referral_code_prefix': 'REF',
-    'normal_reward': 5, # MNTC for normal users
+    'normal_reward': 4, # MNTC for normal users
     'referred_reward': 4, # MNTC for referred users
     'referrer_bonus': 2, # MNTC bonus for referrers (you'll update manually) - UPDATED FROM 1 TO 2
 }
@@ -573,7 +573,7 @@ ADMIN_TEMPLATES = {
 
 **📊 Total Statistics:**
 • Total Completed Users: **{total_completed}**
-• Normal Users (5 MNTC): **{normal_users}**
+• Normal Users (4 MNTC): **{normal_users}**
 • Referred Users (4 MNTC): **{referred_users}**
 
 **💰 MNTC Distribution:**
