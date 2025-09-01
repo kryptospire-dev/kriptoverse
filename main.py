@@ -402,7 +402,7 @@ Share your referral link to earn more rewards! 💰
         if query.data == CALLBACK_DATA['verify_step_1']:
             if current_step == 1:
                 self.db.update_user_step(user_id, 1, True)
-                await query.edit_message_text(f"{EMOJIS['checkmark']} Great! App download confirmed.\n\nMoving to Twitter step...")
+                await query.edit_message_text(f"{EMOJIS['checkmark']} Great! App download confirmed.\n\nMoving to next step...")
                 
                 # Send Step 2 as a new message
                 step_message = STEPS.get(2, "Invalid step")
