@@ -936,7 +936,6 @@ Thank you for using Minati Vault Bot! 🚀
 • /status - Check your current progress
 • /help - Show this help message
 • /stats - Bot statistics
-• /referral - Get your referral link and stats
 
 *Verification Process:*
 ✅ Username collection for Twitter, Instagram & CoinMarketCap
