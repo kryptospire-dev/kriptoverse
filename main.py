@@ -638,7 +638,7 @@ Thank you for using Minati Vault Bot! 🚀
 • Reward Type: {reward_info.get('reward_type', 'Unknown').title()}
 • Status: {STATUS_ICONS.get(reward_info.get('reward_status', 'pending'), '⏳ Pending')}
 
-*Need Changes?* Contact support for assistance
+*Need Changes?* @Minatirewards
 """
             keyboard = [
                 # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
