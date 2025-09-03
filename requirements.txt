@@ -1,5 +1,5 @@
 # Core Dependencies
-python-telegram-bot>=20.8
+python-telegram-bot>=20.7
 firebase-admin>=6.5.0
 python-dotenv>=1.0.1
 
