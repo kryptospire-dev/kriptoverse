@@ -8,7 +8,6 @@ import json
 import logging
 import time
 import random
-import threading
 from constants import (
     FIREBASE_ENV_MAPPING,
     FIREBASE_DEFAULTS,
@@ -53,55 +52,6 @@ class Database:
         # Initialize bot stats if not exists
         self._init_bot_stats()
 
-    def optimize_connection(self):
-        """Optimize Firestore connection for better performance"""
-        try:
-            # Set up connection with optimized settings
-            from google.cloud.firestore_v1 import Client
-            from google.api_core.client_options import ClientOptions
-
-            # Configure for better performance in high-load scenarios
-            client_options = ClientOptions(
-                api_endpoint='https://firestore.googleapis.com',
-                quota_project_id=config.FIREBASE_PROJECT_ID
-            )
-
-            logger.info("Database connection optimized for callback handlers")
-
-        except Exception as e:
-            logger.warning(f"Could not optimize database connection: {e}")
-
-    def monitor_connection_health(self):
-        """Monitor connection health in background"""
-        def health_monitor():
-            while True:
-                try:
-                    time.sleep(60)  # Check every minute
-                    health = self.health_check()
-
-                    if health['status'] != 'healthy':
-                        logger.warning(f"Database health check failed: {health}")
-
-                        # If connection is unhealthy, try to reconnect
-                        if self._connection_failures > 3:
-                            logger.info("Attempting database reconnection...")
-                            try:
-                                # Reinitialize connection
-                                self.db = firestore.client()
-                                self.users_collection = self.db.collection(DB_COLLECTIONS['users'])
-                                self.stats_collection = self.db.collection(DB_COLLECTIONS['bot_stats'])
-                                logger.info("Database reconnection successful")
-                            except Exception as reconnect_error:
-                                logger.error(f"Database reconnection failed: {reconnect_error}")
-
-                except Exception as e:
-                    logger.error(f"Health monitor error: {e}")
-
-        # Start health monitoring in background
-        monitor_thread = threading.Thread(target=health_monitor, daemon=True)
-        monitor_thread.start()
-        logger.info("Database health monitoring started")
-
     def _exponential_backoff_delay(self, attempt: int, base_delay: float = 0.1) -> float:
         """Calculate exponential backoff delay with jitter"""
         delay = min(base_delay * (2 ** attempt), 10.0)  # Cap at 10 seconds
@@ -109,30 +59,17 @@ class Database:
         return delay + jitter
 
     def _check_circuit_breaker(self) -> bool:
-        """Enhanced circuit breaker with automatic recovery attempts"""
+        """Check if circuit breaker should be open"""
         if not self._circuit_breaker_open:
             return False
 
-        # Try to recover every 30 seconds
+        # Reset circuit breaker after 30 seconds
         if (self._last_failure_time and
             time.time() - self._last_failure_time > 30):
-
-            # Test connection with a simple operation
-            try:
-                # Simple health check
-                test_doc = self.stats_collection.document('health_check')
-                test_doc.get(timeout=2.0)  # Quick test
-
-                # If successful, reset circuit breaker
-                self._circuit_breaker_open = False
-                self._connection_failures = 0
-                logger.info("Circuit breaker reset - database connection restored")
-                return False
-
-            except Exception as e:
-                logger.warning(f"Circuit breaker recovery test failed: {e}")
-                self._last_failure_time = time.time()  # Reset recovery timer
-                return True
+            self._circuit_breaker_open = False
+            self._connection_failures = 0
+            logger.info("Circuit breaker reset - allowing database operations")
+            return False
 
         return True
 
@@ -158,7 +95,7 @@ class Database:
         """Perform database health check"""
         try:
             # Simple read operation to test connection
-            test_doc = self.stats_collection.document('health_check').get(timeout=3.0)
+            test_doc = self.stats_collection.document('health_check').get()
 
             return {
                 'status': 'healthy',
@@ -175,138 +112,6 @@ class Database:
                 'circuit_breaker_open': self._circuit_breaker_open,
                 'timestamp': datetime.now()
             }
-
-    def get_user_fast(self, user_id: int) -> Optional[Dict]:
-        """
-        Fast user retrieval for callback handlers - single attempt, fail fast
-        Returns: user_data if found, None if not found or error
-        """
-        if self._check_circuit_breaker():
-            logger.warning(f"Circuit breaker open - skipping get_user_fast for {user_id}")
-            return None
-
-        try:
-            logger.debug(f"Fast getting user {user_id}")
-            user_doc = self.users_collection.document(str(user_id)).get(timeout=5.0)  # 5 second timeout
-
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                user_data['_id'] = user_id
-                self._record_success()
-                return user_data
-            else:
-                self._record_success()
-                return None
-
-        except Exception as e:
-            logger.warning(f"get_user_fast failed for user {user_id}: {e}")
-            self._record_failure()
-            return None
-
-    def update_user_step_fast(self, user_id: int, step: int, completed: bool = True) -> bool:
-        """
-        Fast user step update for callback handlers - single attempt, fail fast
-        Returns: True if successful, False otherwise
-        """
-        if self._check_circuit_breaker():
-            logger.warning(f"Circuit breaker open - skipping update_user_step_fast for {user_id}")
-            return False
-
-        try:
-            from constants import TOTAL_STEPS
-
-            update_data = {
-                "current_step": step + 1 if completed else step,
-                f"steps_completed.step_{step}": completed,
-                "updated_at": datetime.now()
-            }
-
-            # Use shorter timeout for callback handlers
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
-
-            # Handle completion logic
-            if step == TOTAL_STEPS and completed:
-                try:
-                    self._update_stats_fast('user_completed')
-
-                    # Get user data for MNTC calculation and referral handling
-                    user_data = self.get_user_fast(user_id)
-                    if user_data:
-                        self._calculate_and_store_mntc_earned(user_data)
-
-                        if user_data.get('referred_by'):
-                            self._handle_referral_completion(user_data['referred_by'], user_id)
-                except Exception as completion_error:
-                    logger.error(f"Error in completion logic for user {user_id}: {completion_error}")
-                    # Don't return False here - the step update succeeded
-
-            logger.info(f"User {user_id} step {step} updated fast: {completed}")
-            self._record_success()
-            return True
-
-        except Exception as e:
-            logger.error(f"Error updating user {user_id} step {step} fast: {e}")
-            self._record_failure()
-            return False
-
-    def _update_stats_fast(self, action: str):
-        """Fast stats update that doesn't block callback handlers"""
-        try:
-            # Use a separate thread for stats updates to avoid blocking
-            def update_in_background():
-                try:
-                    stats_ref = self.stats_collection.document(DB_COLLECTIONS['main_stats'])
-                    if action == 'user_created':
-                        stats_ref.update({
-                            'total_users': firestore.Increment(1),
-                            'updated_at': datetime.now()
-                        }, timeout=3.0)
-                    elif action == 'user_completed':
-                        stats_ref.update({
-                            'completed_users': firestore.Increment(1),
-                            'updated_at': datetime.now()
-                        }, timeout=3.0)
-                except Exception as e:
-                    logger.error(f"Background stats update failed for action {action}: {e}")
-
-            # Run in background thread
-            thread = threading.Thread(target=update_in_background, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            logger.error(f"Error starting background stats update for action {action}: {e}")
-
-    def batch_get_users(self, user_ids: List[int]) -> Dict[int, Optional[Dict]]:
-        """
-        Get multiple users in a single batch operation for better performance
-        Returns: dict mapping user_id to user_data (or None if not found)
-        """
-        if self._check_circuit_breaker():
-            logger.warning("Circuit breaker open - skipping batch_get_users")
-            return {user_id: None for user_id in user_ids}
-
-        result = {}
-        try:
-            # Firestore supports batch reads
-            docs = [self.users_collection.document(str(user_id)) for user_id in user_ids]
-            batch_docs = self.db.get_all(docs, timeout=10.0)
-
-            for i, doc in enumerate(batch_docs):
-                user_id = user_ids[i]
-                if doc.exists:
-                    user_data = doc.to_dict()
-                    user_data['_id'] = user_id
-                    result[user_id] = user_data
-                else:
-                    result[user_id] = None
-
-            self._record_success()
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in batch_get_users: {e}")
-            self._record_failure()
-            return {user_id: None for user_id in user_ids}
 
     def _get_credentials(self):
         """Get Firebase credentials with comprehensive error handling and priority order"""
@@ -491,7 +296,7 @@ class Database:
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Getting user {user_id}, attempt {attempt + 1}")
-                user_doc = self.users_collection.document(str(user_id)).get(timeout=5.0)
+                user_doc = self.users_collection.document(str(user_id)).get()
 
                 if user_doc.exists:
                     user_data = user_doc.to_dict()
@@ -534,7 +339,7 @@ class Database:
                 logger.debug(f"Creating user {user_id}, attempt {attempt + 1}")
 
                 # First check if user already exists to avoid conflicts
-                existing_check = self.users_collection.document(str(user_id)).get(timeout=3.0)
+                existing_check = self.users_collection.document(str(user_id)).get()
                 if existing_check.exists:
                     logger.info(f"User {user_id} already exists - skipping creation")
                     self._record_success()
@@ -557,9 +362,9 @@ class Database:
                 })
 
                 # Create the user
-                self.users_collection.document(str(user_id)).set(user_data, timeout=5.0)
+                self.users_collection.document(str(user_id)).set(user_data)
 
-                self._update_stats_fast('user_created')
+                self._update_stats('user_created')
                 self._record_success()
                 logger.info(f"User {user_id} created successfully with referral code: {referral_code}")
                 if referred_by:
@@ -665,7 +470,7 @@ class Database:
                 mntc_earned = REFERRAL_CONFIG['referred_reward']  # 4 MNTC for referred users
                 logger.info(f"User {user_id} earned {mntc_earned} MNTC (referred user)")
             else:
-                mntc_earned = REFERRAL_CONFIG['normal_reward']  # 4 MNTC for normal users
+                mntc_earned = REFERRAL_CONFIG['normal_reward']  # 5 MNTC for normal users
                 logger.info(f"User {user_id} earned {mntc_earned} MNTC (normal user)")
 
             # Store the earned MNTC and completion details
@@ -681,7 +486,7 @@ class Database:
                 "updated_at": datetime.now()
             }
 
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(update_data)
 
             logger.info(f"Stored reward info for user {user_id}: {mntc_earned} MNTC ({completion_data['reward_type']})")
             return mntc_earned
@@ -705,7 +510,7 @@ class Database:
                     "updated_at": datetime.now()
                 }
 
-                self.users_collection.document(str(referrer_id)).update(update_data, timeout=5.0)
+                self.users_collection.document(str(referrer_id)).update(update_data)
 
                 logger.info(f"Updated referral stats for user {referrer_id}. Total referrals: {current_referrals + 1}")
                 return referrer_id
@@ -723,7 +528,7 @@ class Database:
                 "updated_at": datetime.now()
             }
 
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"User {user_id} {platform} username saved: {username}")
             return True
 
@@ -739,7 +544,7 @@ class Database:
                 "updated_at": datetime.now()
             }
 
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"User {user_id} BEP20 address saved")
             return True
 
@@ -760,7 +565,7 @@ class Database:
             self.users_collection.document(str(user_id)).update({
                 "screenshots": firestore.ArrayUnion([screenshot_data]),
                 "updated_at": datetime.now()
-            }, timeout=5.0)
+            })
 
             logger.info(f"Screenshot added for user {user_id}")
             return True
@@ -772,7 +577,7 @@ class Database:
     def get_user_stats(self) -> Dict:
         """Get overall bot statistics"""
         try:
-            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get(timeout=5.0)
+            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
             if stats_doc.exists:
                 return stats_doc.to_dict()
             else:
@@ -789,12 +594,12 @@ class Database:
                 stats_ref.update({
                     'total_users': firestore.Increment(1),
                     'updated_at': datetime.now()
-                }, timeout=5.0)
+                })
             elif action == 'user_completed':
                 stats_ref.update({
                     'completed_users': firestore.Increment(1),
                     'updated_at': datetime.now()
-                }, timeout=5.0)
+                })
         except Exception as e:
             logger.error(f"Error updating stats for action {action}: {e}")
 
@@ -807,7 +612,7 @@ class Database:
                 "updated_at": datetime.now()
             }
 
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"Updated reward status for user {user_id}: {status}")
             return True
 
@@ -943,7 +748,7 @@ class Database:
                 reset_data = DEFAULT_USER_DATA.copy()
                 reset_data["updated_at"] = datetime.now()
 
-            self.users_collection.document(str(user_id)).update(reset_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(reset_data)
             logger.info(f"User {user_id} progress reset (keep_referral_data: {keep_referral_data})")
             return True
 
@@ -959,7 +764,7 @@ class Database:
                 "updated_at": datetime.now()
             }
 
-            self.users_collection.document(str(user_id)).update(update_data, timeout=5.0)
+            self.users_collection.document(str(user_id)).update(update_data)
             logger.info(f"Updated referral rewards for user {user_id}: {total_rewards} MNTC")
             return True
 
