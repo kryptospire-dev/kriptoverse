@@ -44,21 +44,21 @@ def rate_limit(calls_per_minute: int = 10):
         async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not config.REDIS_AVAILABLE:
                 return await func(self, update, context)
-            
+
             user_id = update.effective_user.id
             key = f"rate_limit:{user_id}:{func.__name__}"
-            
+
             try:
                 current_calls = config.redis_client.get(key)
                 if current_calls and int(current_calls) >= calls_per_minute:
                     await update.message.reply_text("⚠️ Too many requests. Please wait a moment.")
                     return
-                
+
                 config.redis_client.incr(key)
                 config.redis_client.expire(key, 60)  # 1 minute window
             except Exception as e:
                 logger.warning(f"Rate limiting error: {e}")
-            
+
             return await func(self, update, context)
         return wrapper
     return decorator
@@ -68,20 +68,20 @@ def admin_required(func):
     @wraps(func)
     async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        
+
         # Get admin IDs from environment variable
         admin_ids_str = os.getenv("ADMIN_USER_IDS", "")
         admin_ids = [int(id.strip()) for id in admin_ids_str.split(",") if id.strip().isdigit()]
-        
+
         if not admin_ids:
             await update.message.reply_text("❌ Admin system not configured")
             return
-            
+
         if user_id not in admin_ids:
             logger.warning(f"Unauthorized admin access attempt by user {user_id}")
             await update.message.reply_text("❌ Unauthorized")
             return
-        
+
         return await func(self, update, context)
     return wrapper
 
@@ -91,11 +91,11 @@ async def initialize_services():
         # Initialize validators first (no external dependencies)
         validators = Validators()
         logger.info("✅ Validators initialized successfully")
-        
+
         # Initialize async database
         db = AsyncDatabase()
         logger.info("✅ Async Database initialized successfully")
-        
+
         return db, validators
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
@@ -107,7 +107,7 @@ class MinatiVaultBot:
         self.validators = None
         self.application = None
         self.running = False
-        
+
         # Rate limiting cache
         self._rate_limit_cache = {}
 
@@ -128,7 +128,7 @@ class MinatiVaultBot:
             is_valid, _ = self.validators.validate_coinmarketcap_userid(username)
         else:
             is_valid, _ = self.validators.validate_username(username)
-        
+
         # Simulate async API call delay without blocking
         await asyncio.sleep(0.1)
         return is_valid
@@ -160,7 +160,7 @@ class MinatiVaultBot:
             # NEW USER - Apply referral logic
             logger.info(f"Creating new user {user_id}")
             referred_by = None
-            
+
             if referral_code:
                 # Validate referral code exists and get referrer
                 try:
@@ -172,7 +172,7 @@ class MinatiVaultBot:
                                 f"{EMOJIS['cross']} {MESSAGE_TEMPLATES['referral_self_use']}"
                             )
                             return
-                        
+
                         referred_by = referral_code
                         logger.info(f"User {user_id} will be created with referral by: {referred_by}")
                     else:
@@ -189,7 +189,7 @@ class MinatiVaultBot:
 
             # Create user asynchronously
             creation_success = await self.db.create_user_async(user_id, username, first_name, referred_by)
-            
+
             if creation_success:
                 welcome_msg = WELCOME_MESSAGE_REFERRED if referred_by else WELCOME_MESSAGE
                 await update.message.reply_text(
@@ -207,7 +207,7 @@ class MinatiVaultBot:
             # EXISTING USER
             logger.info(f"Existing user {user_id} accessed bot")
             current_step = existing_user.get('current_step', 1)
-            
+
             if referral_code:
                 await update.message.reply_text(
                     f"Welcome back {first_name}! {EMOJIS['fire']}\n\n"
@@ -272,7 +272,7 @@ Share your referral link to earn more rewards! 💰
                 await update.message.reply_text(
                     f"{EMOJIS['party']} Congratulations! All steps completed!\n\n"
                     f"Support: [Contact Us](https://t.me/Minatirewards)",
-                    parse_mode='HTML'
+                    parse_mode='Markdown'
                 )
             return
 
@@ -321,7 +321,7 @@ Share your referral link to earn more rewards! 💰
                     missing_fields.append('Twitter username')
                     can_complete = False
                 if not social_usernames.get('instagram'):
-                    missing_fields.append('Instagram username')  
+                    missing_fields.append('Instagram username')
                     can_complete = False
                 if not social_usernames.get('coinmarketcap'):
                     missing_fields.append('CoinMarketCap User ID')
@@ -346,13 +346,10 @@ Share your referral link to earn more rewards! 💰
         keyboard.append([InlineKeyboardButton(f"{EMOJIS['question']} Need Help", callback_data=CALLBACK_DATA['help'])])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Use HTML for better parsing
-        html_text = f"<b>Step {step}/{TOTAL_STEPS} {EMOJIS['target']}</b>\n\n{step_message}"
-        
         await update.message.reply_text(
-            html_text,
+            f"**Step {step}/{TOTAL_STEPS}** {EMOJIS['target']}\n\n{step_message}",
             reply_markup=reply_markup,
-            parse_mode='HTML',
+            parse_mode='Markdown',
             disable_web_page_preview=True
         )
 
@@ -375,7 +372,7 @@ Share your referral link to earn more rewards! 💰
             if current_step == 1:
                 await self.db.update_user_step_async(user_id, 1, True)
                 await query.edit_message_text(f"{EMOJIS['checkmark']} Great! App download confirmed.\n\nMoving to next step...")
-                
+
                 # Send Step 2 as a new message
                 step_message = STEPS.get(2, "Invalid step")
                 keyboard = [
@@ -384,12 +381,12 @@ Share your referral link to earn more rewards! 💰
                     [InlineKeyboardButton(f"{EMOJIS['question']} Need Help", callback_data=CALLBACK_DATA['help'])]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                
+
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=f"<b>Step 2/{TOTAL_STEPS} {EMOJIS['target']}</b>\n\n{step_message}",
+                    text=f"**Step 2/{TOTAL_STEPS}** {EMOJIS['target']}\n\n{step_message}",
                     reply_markup=reply_markup,
-                    parse_mode='HTML',
+                    parse_mode='Markdown',
                     disable_web_page_preview=True
                 )
             else:
@@ -445,7 +442,7 @@ Share your referral link to earn more rewards! 💰
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 HELP_TEMPLATES['help_button'],
-                parse_mode='HTML',
+                parse_mode='Markdown',
                 reply_markup=reply_markup
             )
 
@@ -592,7 +589,7 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Your Information:*
 • Twitter: @{social_usernames.get('twitter', 'Not provided')}
-• Instagram: @{social_usernames.get('instagram', 'Not provided')}  
+• Instagram: @{social_usernames.get('instagram', 'Not provided')}
 • CoinMarketCap: @{social_usernames.get('coinmarketcap', 'Not provided')}
 • BEP20: {bep20_address[:10]}...{bep20_address[-6:] if bep20_address else 'Not provided'}
 
@@ -647,10 +644,10 @@ Thank you for using Minati Vault Bot! 🚀
         """Handle text messages with async operations and input sanitization"""
         user_id = update.effective_user.id
         raw_message = update.message.text
-        
+
         # Sanitize input BEFORE processing
         message_text = self.validators.sanitize_input(raw_message.strip())
-        
+
         # Additional validation
         is_valid_msg, validation_error = self.validators.validate_message_text(message_text)
         if not is_valid_msg:
@@ -674,7 +671,6 @@ Thank you for using Minati Vault Bot! 🚀
                 is_follower = await self.verify_social_follow('twitter', username)
                 if is_follower:
                     if await self.db.save_social_username_async(user_id, 'twitter', username):
-                        # FIXED: Added await to update_user_step_async
                         await self.db.update_user_step_async(user_id, 2, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *Twitter Verified!*\n\n"
@@ -712,7 +708,6 @@ Thank you for using Minati Vault Bot! 🚀
                 is_follower = await self.verify_social_follow('instagram', username)
                 if is_follower:
                     if await self.db.save_social_username_async(user_id, 'instagram', username):
-                        # FIXED: Added await to update_user_step_async
                         await self.db.update_user_step_async(user_id, 3, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *Instagram Verified!*\n\n"
@@ -750,7 +745,6 @@ Thank you for using Minati Vault Bot! 🚀
                 is_follower = await self.verify_social_follow('coinmarketcap', userid)
                 if is_follower:
                     if await self.db.save_social_username_async(user_id, 'coinmarketcap', userid):
-                        # FIXED: Added await to update_user_step_async
                         await self.db.update_user_step_async(user_id, 4, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *CoinMarketCap Verified!*\n\n"
