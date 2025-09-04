@@ -93,6 +93,8 @@ You have successfully completed all steps!
 **What's Next?**
 Our team will review your submission and contact you soon!
 
+✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
+
 **🎁 Start Earning More! Get Your Referral Link:**
 Use /start command to get your own referral link and start earning bonuses!
 
@@ -123,6 +125,8 @@ Our team will review your submission and contact you soon!
 
 **💰 Referral Rewards:**
 • You get **+2 MNTC** for each successful referral
+
+✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
 
 Share your referral link with friends to earn more rewards! 🚀
 
