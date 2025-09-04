@@ -283,6 +283,8 @@ You have already completed all steps!
 • Total Referral Rewards: **{referral_stats['total_referrals']*2} MNTC**
 • Total Recieved Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
 
+✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
+
 Share your referral link to earn more rewards! 💰
 
 {EMOJIS['phone']} Support: [Contact Us](https://t.me/Minatirewards)
@@ -512,6 +514,8 @@ You have successfully completed all steps!
 **What's Next?**
 Our team will review your submission and contact you soon!
 
+✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
+
 **🎁 Your Referral Link:**
 `https://t.me/{REFERRAL_CONFIG['bot_username']}?start={referral_code}`
 
@@ -544,6 +548,8 @@ You have successfully completed all steps!
 
 **🎁 Your Referral Link:**
 `https://t.me/{REFERRAL_CONFIG['bot_username']}?start={referral_code}`
+
+✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
 
 Our team will review your submission and contact you soon!
 
