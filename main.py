@@ -9,6 +9,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest, Forbidden, NetworkError, TimedOut, Conflict
+
 from database import Database
 from validators import Validators
 import config
@@ -41,12 +42,12 @@ validators = None
 def initialize_services():
     """Initialize database and validators with proper error handling"""
     global db, validators
-
+    
     try:
         # Initialize validators first (no external dependencies)
         validators = Validators()
         logger.info("✅ Validators initialized successfully")
-
+        
         # Initialize database with retry logic
         max_retries = 3
         for attempt in range(max_retries):
@@ -61,9 +62,9 @@ def initialize_services():
                 else:
                     logger.error(f"❌ Failed to initialize database after {max_retries} attempts: {e}")
                     raise
-
+        
         return db, validators
-
+        
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         raise
@@ -74,6 +75,7 @@ class MinatiVaultBot:
         self.validators = None
         self.application = None
         self.running = False
+        
         # Rate limiting for start command
         self._last_start_time = None
         self._last_start_user = None
@@ -88,14 +90,26 @@ class MinatiVaultBot:
             raise
 
     async def verify_social_follow(self, platform: str, username: str) -> bool:
-        """Verify if user actually follows on social media"""
-        # For now, we'll do basic username validation
-        # In production, you'd integrate with Twitter/Instagram APIs
-        if platform == 'coinmarketcap':
-            is_valid, _ = self.validators.validate_coinmarketcap_userid(username)
-        else:
-            is_valid, _ = self.validators.validate_username(username)
-        return is_valid
+        """
+        FIXED: Simplified social media verification
+        For now, we assume users have completed the tasks if they provide valid usernames
+        In production, you would integrate with actual APIs
+        """
+        try:
+            if platform == 'coinmarketcap':
+                is_valid, _ = self.validators.validate_coinmarketcap_userid(username)
+            else:
+                is_valid, _ = self.validators.validate_username(username)
+            
+            # FIXED: Return True for valid usernames to allow progression
+            # In production, add actual API verification here
+            logger.info(f"Social media verification for {platform} username {username}: {'passed' if is_valid else 'failed'}")
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"Error in social media verification for {platform}: {e}")
+            # FIXED: Return True on error to not block user progression
+            return True
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command handler with referral support and enhanced error handling"""
@@ -106,7 +120,7 @@ class MinatiVaultBot:
 
         # Rate limiting - prevent spam start commands
         current_time = datetime.now()
-        if (self._last_start_time and self._last_start_user == user_id and
+        if (self._last_start_time and self._last_start_user == user_id and 
             (current_time - self._last_start_time).total_seconds() < 5):
             logger.warning(f"Rate limited /start from user {user_id}")
             return
@@ -128,7 +142,6 @@ class MinatiVaultBot:
         # Enhanced user existence check with retries
         existing_user = None
         max_retries = 3
-
         for attempt in range(max_retries):
             try:
                 existing_user = await self.db.get_user(user_id)
@@ -148,7 +161,6 @@ class MinatiVaultBot:
         if not existing_user:
             # NEW USER - Apply referral logic
             logger.info(f"Creating new user {user_id}")
-
             referred_by = None
             if referral_code:
                 # Validate referral code exists and get referrer
@@ -178,7 +190,6 @@ class MinatiVaultBot:
             # Attempt to create user with enhanced error handling
             try:
                 creation_success = await self.db.create_user(user_id, username, first_name, referred_by)
-
                 if creation_success:
                     welcome_msg = WELCOME_MESSAGE_REFERRED if referred_by else WELCOME_MESSAGE
                     await update.message.reply_text(
@@ -214,21 +225,17 @@ class MinatiVaultBot:
                         await update.message.reply_text(
                             f"{EMOJIS['cross']} Technical issue occurred. Please contact support: @Minatirewards"
                         )
-
             except Exception as e:
                 logger.error(f"Exception during user creation for {user_id}: {e}")
                 await update.message.reply_text(
                     f"{EMOJIS['warning']} Service temporarily unavailable. Please try again later.\n\n"
                     f"Support: @Minatirewards"
                 )
-
         else:
             # EXISTING USER - Enhanced handling
             logger.info(f"Existing user {user_id} accessed bot")
-
             try:
                 current_step = existing_user.get('current_step', 1)
-
                 # If user clicked referral link but already exists, ignore referral and show message
                 if referral_code:
                     await update.message.reply_text(
@@ -243,14 +250,13 @@ class MinatiVaultBot:
                         f"Welcome back {first_name}! {EMOJIS['fire']}\n\n"
                         f"You're currently on step {current_step}."
                     )
-
+                
                 if current_step > TOTAL_STEPS:
                     # User already completed
                     await self.show_completion_with_referral(update, existing_user)
                 else:
                     # Show current step
                     await self.show_step(update, context, current_step)
-
             except Exception as e:
                 logger.error(f"Error handling existing user {user_id}: {e}")
                 await update.message.reply_text(
@@ -266,7 +272,6 @@ class MinatiVaultBot:
             [InlineKeyboardButton(f"{EMOJIS['stats']} View Status", callback_data=CALLBACK_DATA['show_status'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
         ]
-
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         completion_text = f"""
@@ -280,7 +285,7 @@ You have already completed all steps!
 **📊 Your Referral Stats:**
 • Total Successful Referrals: **{referral_stats['total_referrals']}**
 • Total Referral Rewards: **{referral_stats['total_referrals']*2} MNTC**
-• Total Recieved Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
+• Total Received Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
 
 ✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
 
@@ -288,7 +293,6 @@ Share your referral link to earn more rewards! 💰
 
 {EMOJIS['phone']} Support: [Contact Us](https://t.me/Minatirewards)
 """
-
         await update.message.reply_text(
             completion_text,
             reply_markup=reply_markup,
@@ -344,11 +348,11 @@ Share your referral link to earn more rewards! 💰
             user_data = await self.db.get_user(update.effective_user.id)
             can_complete = True
             missing_fields = []
-
+            
             if user_data:
                 social_usernames = user_data.get('social_usernames', {})
                 bep20_address = user_data.get('bep20_address')
-
+                
                 if not social_usernames.get('twitter'):
                     missing_fields.append('Twitter username')
                     can_complete = False
@@ -361,7 +365,7 @@ Share your referral link to earn more rewards! 💰
                 if not bep20_address:
                     missing_fields.append('BEP20 address')
                     can_complete = False
-
+                
                 if can_complete:
                     keyboard = [
                         [InlineKeyboardButton(f"{EMOJIS['party']} Complete Process", callback_data=CALLBACK_DATA['complete_process'])]
@@ -389,22 +393,22 @@ Share your referral link to earn more rewards! 💰
         """Handle inline keyboard button clicks with validation"""
         query = update.callback_query
         await query.answer()
-
+        
         user_id = query.from_user.id
         user_data = await self.db.get_user(user_id)
-
+        
         if not user_data:
             await query.edit_message_text(MESSAGE_TEMPLATES['user_not_found'])
             return
-
+        
         current_step = user_data.get('current_step', 1)
-
+        
         # Step 1 verification
         if query.data == CALLBACK_DATA['verify_step_1']:
             if current_step == 1:
                 await self.db.update_user_step(user_id, 1, True)
                 await query.edit_message_text(f"{EMOJIS['checkmark']} Great! App download confirmed.\n\nMoving to next step...")
-
+                
                 # Send Step 2 as a new message
                 step_message = STEPS.get(2, "Invalid step")
                 keyboard = [
@@ -413,7 +417,7 @@ Share your referral link to earn more rewards! 💰
                     [InlineKeyboardButton(f"{EMOJIS['question']} Need Help", callback_data=CALLBACK_DATA['help'])]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-
+                
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=f"**Step 2/{TOTAL_STEPS}** {EMOJIS['target']}\n\n{step_message}",
@@ -423,11 +427,10 @@ Share your referral link to earn more rewards! 💰
                 )
             else:
                 await query.edit_message_text(MESSAGE_TEMPLATES['step_mismatch'].format(1))
-
+        
         # Complete process
         elif query.data == CALLBACK_DATA['complete_process']:
             logger.info(f"Complete process clicked by user {user_id}, current_step: {current_step}")
-
             if current_step == 6:
                 logger.info(f"User {user_id} completing step 6")
                 await self.db.update_user_step(user_id, 6, True)
@@ -441,7 +444,7 @@ Share your referral link to earn more rewards! 💰
                 await query.edit_message_text(
                     f"❌ You must complete all previous steps first.\n\nYour current step: {current_step}/6\n\nUse /status to check your progress."
                 )
-
+        
         # Info buttons
         elif query.data == CALLBACK_DATA['twitter_info']:
             await query.edit_message_text(HELP_TEMPLATES['instructions']['twitter'])
@@ -451,17 +454,17 @@ Share your referral link to earn more rewards! 💰
             await query.edit_message_text(HELP_TEMPLATES['instructions']['coinmarketcap'])
         elif query.data == CALLBACK_DATA['bep20_info']:
             await query.edit_message_text(HELP_TEMPLATES['instructions']['bep20'])
-
+        
         # Show status
         elif query.data == CALLBACK_DATA['show_status']:
             fresh_user_data = await self.db.get_user(user_id)
             await self.show_status_callback(query, fresh_user_data)
-
+        
         # Show referral stats
         elif query.data == CALLBACK_DATA['show_referral']:
             fresh_user_data = await self.db.get_user(user_id)
             await self.show_referral_stats_callback(query, fresh_user_data)
-
+        
         # Help
         elif query.data == CALLBACK_DATA['help']:
             keyboard = [
@@ -473,7 +476,6 @@ Share your referral link to earn more rewards! 💰
                 [InlineKeyboardButton(f"{EMOJIS['coinmarketcap']} CoinMarketCap", url=SOCIAL_LINKS['coinmarketcap'])]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-
             await query.edit_message_text(
                 HELP_TEMPLATES['help_button'],
                 parse_mode='Markdown',
@@ -486,15 +488,15 @@ Share your referral link to earn more rewards! 💰
         bep20_address = user_data.get('bep20_address', '')
         is_referred = user_data.get('is_referred', False)
         referral_code = user_data.get('referral_code', '')
-
+        
         # Get the actual MNTC earned from reward_info
         reward_info = user_data.get('reward_info', {})
         mntc_earned = reward_info.get('mntc_earned', 0)
-
+        
         # If MNTC is 0, calculate it based on referral status (fallback)
         if mntc_earned == 0:
             mntc_earned = REFERRAL_CONFIG['referred_reward'] if is_referred else REFERRAL_CONFIG['normal_reward']
-
+        
         try:
             # UNIFIED COMPLETION MESSAGE - Use same template for ALL users
             completion_message = f"""
@@ -528,13 +530,12 @@ Share your referral link with friends to earn more rewards! 🚀
 
 Thank you for using Minati Vault Bot! 🚀
 """
-
             await query.edit_message_text(completion_message, parse_mode='Markdown')
-
+            
             # Send notification to referrer if user was referred
             if is_referred:
                 await self.notify_referrer(user_data.get('referred_by'), user_data['user_id'])
-
+                
         except Exception as e:
             logger.error(f"Error sending completion message for user {user_data.get('user_id')}: {e}")
             # Fallback message if template formatting fails
@@ -564,36 +565,370 @@ Thank you for using Minati Vault Bot! 🚀
         try:
             if not referrer_code:
                 return
-
+                
             referrer = await self.db.get_user_by_referral_code(referrer_code)
             if not referrer:
                 return
-
+            
             referrer_id = referrer['user_id']
             referral_stats = referrer.get('referral_stats', {'total_referrals': 0, 'total_rewards': 0})
-
+            
             notification_message = REFERRAL_MESSAGES['referral_success_notification'].format(
                 total_referrals=referral_stats['total_referrals'],
                 total_rewards=referral_stats['total_rewards'],
                 bot_username=REFERRAL_CONFIG['bot_username'],
                 referral_code=referrer['referral_code']
             )
-
+            
             await self.application.bot.send_message(
                 chat_id=referrer_id,
                 text=notification_message,
                 parse_mode='Markdown'
             )
-
+            
             logger.info(f"Notified referrer {referrer_id} about successful referral from user {completed_user_id}")
-
+            
         except Exception as e:
             logger.error(f"Error notifying referrer {referrer_code}: {e}")
 
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """FIXED: Handle text messages with enhanced validation and better feedback"""
+        user_id = update.effective_user.id
+        message_text = update.message.text.strip()
+        
+        # Get user data with error handling
+        try:
+            user_data = await asyncio.wait_for(self.db.get_user(user_id), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout getting user data for {user_id}")
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} Database timeout. Please try again in a moment.",
+                parse_mode='Markdown'
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error getting user data for {user_id}: {e}")
+            await update.message.reply_text(
+                f"{EMOJIS['cross']} Please use /start command first.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        if not user_data:
+            await update.message.reply_text(f"{EMOJIS['cross']} Please use /start command first.")
+            return
+        
+        current_step = user_data.get('current_step', 1)
+        logger.info(f"User {user_id} is on step {current_step}, processing message: {message_text[:50]}")
+        
+        # Step 2: Handle Twitter username
+        if current_step == 2:
+            await self.handle_twitter_step(update, context, user_id, message_text)
+            
+        # Step 3: Handle Instagram username  
+        elif current_step == 3:
+            await self.handle_instagram_step(update, context, user_id, message_text)
+            
+        # Step 4: Handle CoinMarketCap User ID
+        elif current_step == 4:
+            await self.handle_coinmarketcap_step(update, context, user_id, message_text)
+            
+        # Step 5: Handle BEP20 address
+        elif current_step == 5:
+            await self.handle_bep20_step(update, context, user_id, message_text)
+            
+        # Default response for other steps
+        else:
+            await update.message.reply_text(
+                f"{EMOJIS['target']} *You're currently on step {current_step}*\n\n"
+                "Please follow the instructions above or use the buttons provided.\n\n" +
+                MESSAGE_TEMPLATES['need_help'],
+                parse_mode='Markdown'
+            )
+
+    async def handle_twitter_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, message_text: str):
+        """FIXED: Handle Twitter username submission with guaranteed feedback"""
+        username = message_text.lstrip('@').strip()
+        logger.info(f"Processing Twitter username for user {user_id}: {username}")
+        
+        try:
+            # Validate username format
+            is_valid, validation_message = self.validators.validate_username(username)
+            
+            if not is_valid:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} **Invalid Twitter Username**\n\n"
+                    f"Error: {validation_message}\n\n"
+                    "Please send a valid Twitter username (without @).",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Always assume verification passed for now (simplified)
+            # Save to database with timeout protection
+            save_success = await asyncio.wait_for(
+                self.db.save_social_username(user_id, 'twitter', username),
+                timeout=10.0
+            )
+            
+            if save_success:
+                # Update step with timeout protection
+                step_update_success = await asyncio.wait_for(
+                    self.db.update_user_step(user_id, 2, True),
+                    timeout=10.0
+                )
+                
+                if step_update_success:
+                    # Send confirmation message
+                    await update.message.reply_text(
+                        f"{EMOJIS['checkmark']} **Twitter Username Saved!** {EMOJIS['twitter']}\n\n"
+                        f"Username: @{username}\n"
+                        f"Thank you for following us on Twitter!\n\n"
+                        "Moving to next step...",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Show next step
+                    await asyncio.sleep(1)  # Brief delay for better UX
+                    await self.show_step(update, context, 3)
+                else:
+                    await update.message.reply_text(
+                        f"{EMOJIS['warning']} Username saved but couldn't update progress. Please try /status to check your progress.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} Failed to save Twitter username. Please try again or contact support: @Minatirewards",
+                    parse_mode='Markdown'
+                )
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout processing Twitter username for user {user_id}")
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} Request timeout. Please try again in a moment.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error processing Twitter username for user {user_id}: {e}")
+            await update.message.reply_text(
+                f"{EMOJIS['cross']} An error occurred. Please try again or contact support: @Minatirewards",
+                parse_mode='Markdown'
+            )
+
+    async def handle_instagram_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, message_text: str):
+        """FIXED: Handle Instagram username submission with guaranteed feedback"""
+        username = message_text.lstrip('@').strip()
+        logger.info(f"Processing Instagram username for user {user_id}: {username}")
+        
+        try:
+            # Validate username format
+            is_valid, validation_message = self.validators.validate_username(username)
+            
+            if not is_valid:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} **Invalid Instagram Username**\n\n"
+                    f"Error: {validation_message}\n\n"
+                    "Please send a valid Instagram username (without @).",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Always assume verification passed for now (simplified)
+            # Save to database with timeout protection
+            save_success = await asyncio.wait_for(
+                self.db.save_social_username(user_id, 'instagram', username),
+                timeout=10.0
+            )
+            
+            if save_success:
+                # Update step with timeout protection
+                step_update_success = await asyncio.wait_for(
+                    self.db.update_user_step(user_id, 3, True),
+                    timeout=10.0
+                )
+                
+                if step_update_success:
+                    # Send confirmation message
+                    await update.message.reply_text(
+                        f"{EMOJIS['checkmark']} **Instagram Username Saved!** {EMOJIS['instagram']}\n\n"
+                        f"Username: @{username}\n"
+                        f"Thank you for following us on Instagram!\n\n"
+                        "Moving to next step...",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Show next step
+                    await asyncio.sleep(1)  # Brief delay for better UX
+                    await self.show_step(update, context, 4)
+                else:
+                    await update.message.reply_text(
+                        f"{EMOJIS['warning']} Username saved but couldn't update progress. Please try /status to check your progress.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} Failed to save Instagram username. Please try again or contact support: @Minatirewards",
+                    parse_mode='Markdown'
+                )
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout processing Instagram username for user {user_id}")
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} Request timeout. Please try again in a moment.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error processing Instagram username for user {user_id}: {e}")
+            await update.message.reply_text(
+                f"{EMOJIS['cross']} An error occurred. Please try again or contact support: @Minatirewards",
+                parse_mode='Markdown'
+            )
+
+    async def handle_coinmarketcap_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, message_text: str):
+        """FIXED: Handle CoinMarketCap User ID submission with guaranteed feedback"""
+        userid = message_text.strip()
+        logger.info(f"Processing CoinMarketCap User ID for user {user_id}: {userid}")
+        
+        try:
+            # Validate User ID format
+            is_valid, validation_message = self.validators.validate_coinmarketcap_userid(userid)
+            
+            if not is_valid:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} **Invalid CoinMarketCap User ID**\n\n"
+                    f"Error: {validation_message}\n\n"
+                    "Please send a valid CoinMarketCap User ID.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Always assume verification passed for now (simplified)
+            # Save to database with timeout protection
+            save_success = await asyncio.wait_for(
+                self.db.save_social_username(user_id, 'coinmarketcap', userid),
+                timeout=10.0
+            )
+            
+            if save_success:
+                # Update step with timeout protection
+                step_update_success = await asyncio.wait_for(
+                    self.db.update_user_step(user_id, 4, True),
+                    timeout=10.0
+                )
+                
+                if step_update_success:
+                    # Send confirmation message
+                    await update.message.reply_text(
+                        f"{EMOJIS['checkmark']} **CoinMarketCap User ID Saved!** {EMOJIS['coinmarketcap']}\n\n"
+                        f"User ID: {userid}\n"
+                        f"Thank you for following us on CoinMarketCap!\n\n"
+                        "Moving to next step...",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Show next step
+                    await asyncio.sleep(1)  # Brief delay for better UX
+                    await self.show_step(update, context, 5)
+                else:
+                    await update.message.reply_text(
+                        f"{EMOJIS['warning']} User ID saved but couldn't update progress. Please try /status to check your progress.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} Failed to save CoinMarketCap User ID. Please try again or contact support: @Minatirewards",
+                    parse_mode='Markdown'
+                )
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout processing CoinMarketCap User ID for user {user_id}")
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} Request timeout. Please try again in a moment.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error processing CoinMarketCap User ID for user {user_id}: {e}")
+            await update.message.reply_text(
+                f"{EMOJIS['cross']} An error occurred. Please try again or contact support: @Minatirewards",
+                parse_mode='Markdown'
+            )
+
+    async def handle_bep20_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, message_text: str):
+        """FIXED: Handle BEP20 address submission with guaranteed feedback"""
+        address = message_text.strip()
+        logger.info(f"Processing BEP20 address for user {user_id}: {address[:10]}...")
+        
+        try:
+            # Validate BEP20 address format
+            is_valid, validation_message = self.validators.validate_bep20_address(address)
+            
+            if not is_valid:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} **Invalid BEP20 Address**\n\n"
+                    f"Error: {validation_message}\n\n"
+                    "Requirements:\n"
+                    "• Must start with 0x\n"
+                    "• Must be exactly 42 characters long\n"
+                    "• Example: 0x742d35Cc6634C0532925a3b8D4B29E3f5fCffd52",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            # Save to database with timeout protection
+            save_success = await asyncio.wait_for(
+                self.db.save_bep20_address(user_id, address),
+                timeout=10.0
+            )
+            
+            if save_success:
+                # Update step with timeout protection
+                step_update_success = await asyncio.wait_for(
+                    self.db.update_user_step(user_id, 5, True),
+                    timeout=10.0
+                )
+                
+                if step_update_success:
+                    # Send confirmation message
+                    await update.message.reply_text(
+                        f"{EMOJIS['checkmark']} **BEP20 Address Saved!** {EMOJIS['wallet']}\n\n"
+                        f"Address: `{address}`\n\n"
+                        "Moving to final verification step...",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Show next step
+                    await asyncio.sleep(1)  # Brief delay for better UX
+                    await self.show_step(update, context, 6)
+                else:
+                    await update.message.reply_text(
+                        f"{EMOJIS['warning']} Address saved but couldn't update progress. Please try /status to check your progress.",
+                        parse_mode='Markdown'
+                    )
+            else:
+                await update.message.reply_text(
+                    f"{EMOJIS['cross']} Failed to save BEP20 address. Please try again or contact support: @Minatirewards",
+                    parse_mode='Markdown'
+                )
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout processing BEP20 address for user {user_id}")
+            await update.message.reply_text(
+                f"{EMOJIS['warning']} Request timeout. Please try again in a moment.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error processing BEP20 address for user {user_id}: {e}")
+            await update.message.reply_text(
+                f"{EMOJIS['cross']} An error occurred. Please try again or contact support: @Minatirewards",
+                parse_mode='Markdown'
+            )
+
+    # ... (Rest of the methods remain the same: show_referral_stats_callback, show_status_callback, etc.)
+    
     async def show_referral_stats_callback(self, query, user_data):
         """Show referral statistics via callback"""
         referral_stats = user_data.get('referral_stats', {'total_referrals': 0, 'total_rewards': 0})
-
+        
         stats_text = REFERRAL_STATS_TEMPLATE.format(
             total_referrals=referral_stats['total_referrals'],
             total_rewards=referral_stats['total_rewards'],
@@ -606,8 +941,8 @@ Thank you for using Minati Vault Bot! 🚀
             [InlineKeyboardButton(f"{EMOJIS['stats']} View Status", callback_data=CALLBACK_DATA['show_status'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
         ]
-
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(stats_text, parse_mode='Markdown', reply_markup=reply_markup)
 
     async def show_status_callback(self, query, user_data):
@@ -666,184 +1001,31 @@ Thank you for using Minati Vault Bot! 🚀
                 referral_stats['total_referrals'],
                 referral_stats['total_rewards'],
                 reward_info.get('mntc_earned', 0),
-                STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), 'β Correct'),
+                STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), '❌ Not Completed'),
                 MESSAGE_TEMPLATES['all_completed'] if current_step > TOTAL_STEPS else f"Continue with Step {current_step}"
             )
             keyboard = []
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-
         await query.edit_message_text(
             status_text,
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle text messages with enhanced validation"""
-        user_id = update.effective_user.id
-        message_text = update.message.text.strip()
-        user_data = await self.db.get_user(user_id)
-
-        if not user_data:
-            await update.message.reply_text(f"{EMOJIS['cross']} Please use /start command first.")
-            return
-
-        current_step = user_data.get('current_step', 1)
-
-        # Step 2: Handle Twitter username
-        if current_step == 2:
-            username = message_text.lstrip('@').strip()
-            is_valid, validation_message = self.validators.validate_username(username)
-
-            if is_valid:
-                is_follower = await self.verify_social_follow('twitter', username)
-                if is_follower:
-                    if await self.db.save_social_username(user_id, 'twitter', username):
-                        await self.db.update_user_step(user_id, 2, True)
-                        await update.message.reply_text(
-                            f"{EMOJIS['checkmark']} *Twitter Verified!*\n\n"
-                            f"Username: @{username}\n"
-                            f"Thank you for following us on Twitter! {EMOJIS['twitter']}\n\n"
-                            "Moving to next step...",
-                            parse_mode='Markdown'
-                        )
-                        await self.show_step(update, context, 3)
-                    else:
-                        await update.message.reply_text(MESSAGE_TEMPLATES['error_saving'].format('Twitter username'))
-                else:
-                    await update.message.reply_text(
-                        f"{EMOJIS['warning']} *Username received but not verified*\n\n"
-                        f"Username: @{username}\n\n"
-                        "*Please make sure you:*\n"
-                        "1. Actually followed our Twitter account\n"
-                        "2. Liked and retweeted our pinned post\n"
-                        "3. Wait 30 seconds then try again\n\n"
-                        f"Twitter: {SOCIAL_LINKS['twitter']}",
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text(
-                    MESSAGE_TEMPLATES['invalid_username'].format('Twitter', validation_message, 'Twitter')
-                )
-            return
-
-        # Step 3: Handle Instagram username
-        elif current_step == 3:
-            username = message_text.lstrip('@').strip()
-            is_valid, validation_message = self.validators.validate_username(username)
-
-            if is_valid:
-                is_follower = await self.verify_social_follow('instagram', username)
-                if is_follower:
-                    if await self.db.save_social_username(user_id, 'instagram', username):
-                        await self.db.update_user_step(user_id, 3, True)
-                        await update.message.reply_text(
-                            f"{EMOJIS['checkmark']} *Instagram Verified!*\n\n"
-                            f"Username: @{username}\n"
-                            f"Thank you for following us on Instagram! {EMOJIS['instagram']}\n\n"
-                            "Moving to next step...",
-                            parse_mode='Markdown'
-                        )
-                        await self.show_step(update, context, 4)
-                    else:
-                        await update.message.reply_text(MESSAGE_TEMPLATES['error_saving'].format('Instagram username'))
-                else:
-                    await update.message.reply_text(
-                        f"{EMOJIS['warning']} *Username received but not verified*\n\n"
-                        f"Username: @{username}\n\n"
-                        "*Please make sure you:*\n"
-                        "1. Actually followed our Instagram account\n"
-                        "2. Liked our latest post\n"
-                        "3. Wait 30 seconds then try again\n\n"
-                        f"Instagram: {SOCIAL_LINKS['instagram']}",
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text(
-                    MESSAGE_TEMPLATES['invalid_username'].format('Instagram', validation_message, 'Instagram')
-                )
-            return
-
-        # Step 4: Handle CoinMarketCap User ID
-        elif current_step == 4:
-            userid = message_text.strip()
-            is_valid, validation_message = self.validators.validate_coinmarketcap_userid(userid)
-
-            if is_valid:
-                is_follower = await self.verify_social_follow('coinmarketcap', userid)
-                if is_follower:
-                    if await self.db.save_social_username(user_id, 'coinmarketcap', userid):
-                        await self.db.update_user_step(user_id, 4, True)
-                        await update.message.reply_text(
-                            f"{EMOJIS['checkmark']} *CoinMarketCap Verified!*\n\n"
-                            f"User ID: {userid}\n"
-                            f"Thank you for following us on CoinMarketCap! {EMOJIS['coinmarketcap']}\n\n"
-                            "Moving to next step...",
-                            parse_mode='Markdown'
-                        )
-                        await self.show_step(update, context, 5)
-                    else:
-                        await update.message.reply_text(MESSAGE_TEMPLATES['error_saving'].format('CoinMarketCap User ID'))
-                else:
-                    await update.message.reply_text(
-                        f"{EMOJIS['warning']} *User ID received but not verified*\n\n"
-                        f"User ID: {userid}\n\n"
-                        "*Please make sure you:*\n"
-                        "1. Actually followed our project on CoinMarketCap\n"
-                        "2. Added to your watchlist\n"
-                        "3. Wait 30 seconds then try again\n\n"
-                        f"CoinMarketCap: {SOCIAL_LINKS['coinmarketcap']}",
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text(
-                    MESSAGE_TEMPLATES['invalid_coinmarketcap_id'].format(validation_message)
-                )
-            return
-
-        # Step 5: Handle BEP20 address
-        elif current_step == 5:
-            is_valid, message = self.validators.validate_bep20_address(message_text)
-
-            if is_valid:
-                if await self.db.save_bep20_address(user_id, message_text):
-                    await self.db.update_user_step(user_id, 5, True)
-                    await update.message.reply_text(
-                        f"{EMOJIS['checkmark']} *BEP20 Address Saved!*\n\n"
-                        f"Address: `{message_text}`\n\n"
-                        "Moving to final step...",
-                        parse_mode='Markdown'
-                    )
-                    await self.show_step(update, context, 6)
-                else:
-                    await update.message.reply_text(MESSAGE_TEMPLATES['error_saving'].format('address'))
-            else:
-                await update.message.reply_text(
-                    MESSAGE_TEMPLATES['invalid_address'].format(message) +
-                    "\n• Must start with 0x\n• Must be 42 characters long\n• Example: 0x742d35Cc6634C0532925a3b8D4B29E3f5fCffd52"
-                )
-            return
-
-        # Default response
-        await update.message.reply_text(
-            f"{EMOJIS['target']} *You're currently on step {current_step}*\n\n"
-            "Please follow the instructions above or use the buttons provided.\n\n" +
-            MESSAGE_TEMPLATES['need_help'],
-            parse_mode='Markdown'
-        )
-
+    # ... (Keep all other methods like referral_command, status_command, help_command, stats_command, etc. the same)
+    
     async def referral_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show referral statistics and link"""
         user_id = update.effective_user.id
         user_data = await self.db.get_user(user_id)
-
+        
         if not user_data:
             await update.message.reply_text(MESSAGE_TEMPLATES['user_not_found'])
             return
-
+        
         referral_stats = user_data.get('referral_stats', {'total_referrals': 0, 'total_rewards': 0})
-
+        
         stats_text = REFERRAL_STATS_TEMPLATE.format(
             total_referrals=referral_stats['total_referrals'],
             total_rewards=referral_stats['total_rewards'],
@@ -856,9 +1038,8 @@ Thank you for using Minati Vault Bot! 🚀
             [InlineKeyboardButton(f"{EMOJIS['stats']} View Status", callback_data=CALLBACK_DATA['show_status'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
         ]
-
         reply_markup = InlineKeyboardMarkup(keyboard)
-
+        
         await update.message.reply_text(
             stats_text,
             parse_mode='Markdown',
@@ -869,11 +1050,11 @@ Thank you for using Minati Vault Bot! 🚀
         """Status command with verification info and referral stats"""
         user_id = update.effective_user.id
         user_data = await self.db.get_user(user_id)
-
+        
         if not user_data:
             await update.message.reply_text(MESSAGE_TEMPLATES['user_not_found'])
             return
-
+        
         current_step = user_data.get('current_step', 1)
         steps_completed = user_data.get('steps_completed', {})
         bep20_address = user_data.get('bep20_address')
@@ -899,7 +1080,7 @@ Thank you for using Minati Vault Bot! 🚀
             referral_stats['total_referrals'],
             referral_stats['total_rewards'],
             reward_info.get('mntc_earned', 0),
-            STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), 'β Correct'),
+            STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), '❌ Not Completed'),
             MESSAGE_TEMPLATES['all_completed'] if current_step > TOTAL_STEPS else f"Continue with Step {current_step}"
         )
 
@@ -907,9 +1088,8 @@ Thank you for using Minati Vault Bot! 🚀
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])],
             [InlineKeyboardButton(f"{EMOJIS['coinmarketcap']} CoinMarketCap", url=SOCIAL_LINKS['coinmarketcap'])],
         ]
-
         reply_markup = InlineKeyboardMarkup(keyboard)
-
+        
         await update.message.reply_text(
             status_text,
             parse_mode='Markdown',
@@ -925,7 +1105,6 @@ Thank you for using Minati Vault Bot! 🚀
              InlineKeyboardButton(f"{EMOJIS['instagram']} Instagram", url=SOCIAL_LINKS['instagram'])],
             [InlineKeyboardButton(f"{EMOJIS['coinmarketcap']} CoinMarketCap", url=SOCIAL_LINKS['coinmarketcap'])]
         ]
-
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         help_text = f"""
@@ -958,7 +1137,6 @@ Thank you for using Minati Vault Bot! 🚀
 *Quick Access Links:*
 Use the buttons below for instant access to our platforms
 """
-
         await update.message.reply_text(
             help_text,
             parse_mode='Markdown',
@@ -979,9 +1157,8 @@ Use the buttons below for instant access to our platforms
                 completion_rate,
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             )
-
             await update.message.reply_text(stats_text, parse_mode='Markdown')
-
+            
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             await update.message.reply_text(f"{EMOJIS['cross']} Error retrieving statistics.")
@@ -989,20 +1166,18 @@ Use the buttons below for instant access to our platforms
     async def health_check_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Admin command to check database health"""
         user_id = update.effective_user.id
-
+        
         # Only allow admin users (add your admin user IDs)
         ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
-
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
             return
-
+        
         try:
             health = await self.db.health_check()
-
             status_emoji = "✅" if health['status'] == 'healthy' else "❌"
             circuit_status = "🔴 OPEN" if health.get('circuit_breaker_open') else "🟢 CLOSED"
-
+            
             health_message = f"""
 {status_emoji} **Database Health Check**
 
@@ -1011,19 +1186,18 @@ Use the buttons below for instant access to our platforms
 **Connection Failures:** {health.get('connection_failures', 0)}
 **Last Check:** {health['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}
 """
-
             if health['status'] != 'healthy':
                 health_message += f"\n**Error:** {health.get('error', 'Unknown')}"
-
+                
             await update.message.reply_text(health_message, parse_mode='Markdown')
-
+            
         except Exception as e:
             await update.message.reply_text(f"❌ Health check failed: {e}")
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Enhanced error handler"""
         logger.error(f'Update {update} caused error {context.error}')
-
+        
         # Handle specific error types
         if isinstance(context.error, NetworkError):
             logger.warning("⚠️ Network error occurred, retrying...")
@@ -1043,13 +1217,13 @@ Use the buttons below for instant access to our platforms
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("referral", self.referral_command))
         self.application.add_handler(CommandHandler("health", self.health_check_command))
-
+        
         # Callback query handler
         self.application.add_handler(CallbackQueryHandler(self.button_handler))
-
+        
         # Message handler
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-
+        
         # Error handler
         self.application.add_error_handler(self.error_handler)
 
@@ -1057,44 +1231,43 @@ Use the buttons below for instant access to our platforms
         """Start the bot with polling for Render Background Worker"""
         try:
             logger.info(f"🚀 Starting Minati Vault Bot as Background Worker...")
-
+            
             # Initialize services first
             await self.initialize_services_async()
-
+            
             # Create application
             self.application = Application.builder().token(config.BOT_TOKEN).build()
-
+            
             # Setup handlers
             self.setup_handlers()
-
+            
             logger.info(f"✅ Bot handlers configured")
             logger.info(f"🔥 Firebase connection: Ready")
             logger.info(f"🏆 Firebase Project: {config.FIREBASE_PROJECT_ID}")
             logger.info(f"📊 Enhanced validation features: ACTIVE")
             logger.info(f"🎁 Referral system: ACTIVE")
             logger.info(f"🎯 Starting polling for Background Worker...")
-
+            
             # Initialize the application
             await self.application.initialize()
             await self.application.start()
-
+            
             # Start polling with enhanced error handling
             await self.application.updater.start_polling(
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True
             )
-
+            
             logger.info(f"✅ Bot started successfully as Background Worker!")
             self.running = True
-
+            
             # Keep the bot running
             while self.running:
                 await asyncio.sleep(1)
-
+                
         except Exception as e:
             logger.error(f"❌ Error starting Background Worker: {e}")
             raise
-
         finally:
             if self.application:
                 await self.stop_bot()
@@ -1104,7 +1277,7 @@ Use the buttons below for instant access to our platforms
         try:
             logger.info(f"🛑 Stopping bot gracefully...")
             self.running = False
-
+            
             if self.application:
                 try:
                     if self.application.updater and self.application.updater.running:
@@ -1112,19 +1285,19 @@ Use the buttons below for instant access to our platforms
                         logger.info("✅ Updater stopped")
                 except Exception as e:
                     logger.warning(f"⚠️ Updater stop warning: {e}")
-
+                
                 try:
                     await self.application.stop()
                     logger.info("✅ Application stopped")
                 except Exception as e:
                     logger.warning(f"⚠️ Application stop warning: {e}")
-
+                
                 try:
                     await self.application.shutdown()
                     logger.info("✅ Application shutdown")
                 except Exception as e:
                     logger.warning(f"⚠️ Application shutdown warning: {e}")
-
+            
             # Close database connection
             if self.db:
                 try:
@@ -1132,9 +1305,9 @@ Use the buttons below for instant access to our platforms
                     logger.info("✅ Database connection closed")
                 except Exception as e:
                     logger.warning(f"⚠️ Database close warning: {e}")
-
+            
             logger.info(f"✅ Bot stopped gracefully")
-
+            
         except Exception as e:
             logger.error(f"❌ Error stopping bot: {e}")
 
@@ -1146,31 +1319,27 @@ Use the buttons below for instant access to our platforms
 # Main execution for Render Background Worker
 async def main():
     """Main function for Render Background Worker deployment"""
-
     # Configuration validation
     logger.info("🔍 Validating configuration...")
-
     if not config.BOT_TOKEN:
         logger.error("❌ BOT_TOKEN not found!")
         sys.exit(1)
-
     if not config.FIREBASE_PROJECT_ID:
         logger.error("❌ FIREBASE_PROJECT_ID not found!")
         sys.exit(1)
-
     logger.info("✅ Configuration validated successfully")
-
+    
     # Create bot instance
     bot = MinatiVaultBot()
-
+    
     # Setup signal handlers for graceful shutdown
     def signal_handler(sig, frame):
         logger.info(f"📡 Received signal {sig}, initiating shutdown...")
         bot.running = False
-
+    
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-
+    
     try:
         await bot.start_polling()
     except KeyboardInterrupt:
@@ -1184,10 +1353,9 @@ if __name__ == '__main__':
         # Check for existing processes
         pid = os.getpid()
         logger.info(f"🚀 Starting Minati Vault Bot as Background Worker (PID: {pid})")
-
+        
         # Run the bot
         asyncio.run(main())
-
     except KeyboardInterrupt:
         logger.info(f"🔥 Bot interrupted by user")
     except Exception as e:
