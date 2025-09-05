@@ -35,13 +35,15 @@ def async_retry(max_retries: int = 3, base_delay: float = 0.1):
                     if self._check_circuit_breaker():
                         logger.warning(f"Circuit breaker open - skipping {func.__name__}")
                         return None
-                    
+
                     result = await func(self, *args, **kwargs)
                     self._record_success()
                     return result
+
                 except Exception as e:
                     logger.warning(f"{func.__name__} attempt {attempt + 1} failed: {e}")
                     self._record_failure()
+
                     if attempt < max_retries - 1:
                         delay = min(base_delay * (2 ** attempt) + random.uniform(0.1, 0.3), 10.0)
                         await asyncio.sleep(delay)
@@ -53,8 +55,8 @@ def async_retry(max_retries: int = 3, base_delay: float = 0.1):
     return decorator
 
 class Database:
-    def __init__(self, max_workers: int = 100):
-        """Initialize Firebase connection with async support and increased concurrency"""
+    def __init__(self, max_workers: int = 20):
+        """Initialize Firebase connection with async support"""
         try:
             firebase_admin.get_app()
             logger.info("Firebase app already initialized")
@@ -62,31 +64,31 @@ class Database:
             cred = self._get_credentials()
             if cred is None:
                 raise Exception("Failed to get Firebase credentials")
-            
+
             firebase_admin.initialize_app(cred, {
                 'projectId': config.FIREBASE_PROJECT_ID
             })
             logger.info(f"Firebase initialized for project: {config.FIREBASE_PROJECT_ID}")
-        
+
         self.db = firestore.client()
         self.users_collection = self.db.collection(DB_COLLECTIONS['users'])
         self.stats_collection = self.db.collection(DB_COLLECTIONS['bot_stats'])
-        
-        # Thread pool for Firebase operations - increased capacity
+
+        # Thread pool for Firebase operations
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-        
-        # Async semaphore to limit concurrent operations - increased capacity
+
+        # Async semaphore to limit concurrent operations
         self.semaphore = asyncio.Semaphore(max_workers)
-        
+
         # Enhanced error handling properties
         self._connection_failures = 0
         self._last_failure_time = None
         self._circuit_breaker_open = False
-        
+
         # Batch operation settings
         self.batch_size = 500
         self.max_batch_operations = 500
-        
+
         # Initialize bot stats if not exists
         asyncio.create_task(self._init_bot_stats_async())
 
@@ -94,21 +96,21 @@ class Database:
         """Check if circuit breaker should be open"""
         if not self._circuit_breaker_open:
             return False
-        
+
         if (self._last_failure_time and
             time.time() - self._last_failure_time > 30):
             self._circuit_breaker_open = False
             self._connection_failures = 0
             logger.info("Circuit breaker reset - allowing database operations")
             return False
-        
+
         return True
 
     def _record_failure(self):
         """Record a database operation failure"""
         self._connection_failures += 1
         self._last_failure_time = time.time()
-        
+
         if self._connection_failures >= 5:
             self._circuit_breaker_open = True
             logger.error(f"Circuit breaker opened after {self._connection_failures} failures")
@@ -117,7 +119,6 @@ class Database:
         """Record a successful database operation"""
         self._connection_failures = 0
         self._last_failure_time = None
-        
         if self._circuit_breaker_open:
             self._circuit_breaker_open = False
             logger.info("Circuit breaker closed - database operations restored")
@@ -134,7 +135,7 @@ class Database:
             test_doc = await self._run_in_executor(
                 lambda: self.stats_collection.document('health_check').get()
             )
-            
+
             return {
                 'status': 'healthy',
                 'connection_failures': self._connection_failures,
@@ -154,7 +155,7 @@ class Database:
     def _get_credentials(self):
         """Get Firebase credentials with comprehensive error handling and priority order"""
         logger.info("Attempting to get Firebase credentials...")
-        
+
         # PRIORITY 1: Try the actual service account file first (most reliable)
         if hasattr(config, 'FIREBASE_SERVICE_ACCOUNT_PATH') and config.FIREBASE_SERVICE_ACCOUNT_PATH:
             if os.path.exists(config.FIREBASE_SERVICE_ACCOUNT_PATH):
@@ -162,7 +163,7 @@ class Database:
                     logger.info(f"Using service account file: {config.FIREBASE_SERVICE_ACCOUNT_PATH}")
                     with open(config.FIREBASE_SERVICE_ACCOUNT_PATH, 'r') as f:
                         service_account_info = json.load(f)
-                    
+
                     if self._validate_service_account(service_account_info):
                         return credentials.Certificate(service_account_info)
                     else:
@@ -171,21 +172,20 @@ class Database:
                     logger.error(f"Error using service account file: {e}")
             else:
                 logger.warning(f"Service account file not found: {config.FIREBASE_SERVICE_ACCOUNT_PATH}")
-        
+
         # PRIORITY 2: Try environment variable with full JSON
         service_account_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
         if service_account_json:
             try:
                 logger.info("Attempting to use FIREBASE_SERVICE_ACCOUNT_JSON...")
                 service_account_info = self._parse_service_account_json(service_account_json)
-                
                 if service_account_info and self._validate_service_account(service_account_info):
                     return credentials.Certificate(service_account_info)
                 else:
                     logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON validation failed")
             except Exception as e:
                 logger.error(f"Error processing FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
-        
+
         # PRIORITY 3: Try individual environment variables
         logger.info("Attempting individual environment variables...")
         service_account_env = self._get_service_account_from_env()
@@ -198,20 +198,19 @@ class Database:
                     logger.warning("Individual environment variables validation failed")
             except Exception as e:
                 logger.error(f"Error using environment variables: {e}")
-        
+
         # PRIORITY 4: Try default credentials (Google Cloud)
         try:
             logger.info("Trying default credentials (Google Cloud environment)")
             return credentials.ApplicationDefault()
         except Exception as e:
             logger.error(f"Error using default credentials: {e}")
-        
+
         logger.error("All Firebase credential methods failed")
         return None
 
     def _parse_service_account_json(self, json_string):
         """Parse service account JSON with multiple fallback methods"""
-        # Try direct JSON parsing
         try:
             if json_string.startswith('{'):
                 service_account_info = json.loads(json_string)
@@ -219,8 +218,7 @@ class Database:
                 return service_account_info
         except json.JSONDecodeError:
             pass
-        
-        # Try base64 decoding
+
         try:
             import base64
             decoded_json = base64.b64decode(json_string).decode('utf-8')
@@ -229,8 +227,7 @@ class Database:
             return service_account_info
         except Exception:
             pass
-        
-        # Try URL decoding
+
         try:
             import urllib.parse
             decoded_json = urllib.parse.unquote(json_string)
@@ -239,7 +236,7 @@ class Database:
             return service_account_info
         except Exception:
             pass
-        
+
         logger.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON with all methods")
         return None
 
@@ -247,36 +244,35 @@ class Database:
         """Validate and fix service account information"""
         if not service_account_info:
             return False
-        
+
         required_fields = ['type', 'project_id', 'private_key', 'client_email']
         missing_fields = [field for field in required_fields if not service_account_info.get(field)]
-        
+
         if missing_fields:
             logger.error(f"Missing required fields: {missing_fields}")
             return False
-        
-        # Fix escaped newlines in private key
+
         private_key = service_account_info.get('private_key', '')
+
         if '\\n' in private_key:
             private_key = private_key.replace('\\n', '\n')
             service_account_info['private_key'] = private_key
             logger.info("Fixed escaped newlines in private key")
-        
-        # Validate private key format
+
         if not private_key.startswith('-----BEGIN PRIVATE KEY-----'):
             logger.error("Private key missing BEGIN marker")
             return False
-        
+
         if not private_key.rstrip().endswith('-----END PRIVATE KEY-----'):
             logger.error("Private key missing END marker")
             return False
-        
-        # Check project ID match
+
         expected_project = config.FIREBASE_PROJECT_ID
         actual_project = service_account_info.get('project_id')
+
         if expected_project and actual_project != expected_project:
             logger.warning(f"Project ID mismatch: expected {expected_project}, got {actual_project}")
-        
+
         logger.info(f"Service account validation passed - Project: {actual_project}")
         return True
 
@@ -284,7 +280,7 @@ class Database:
         """Build service account dict from individual environment variables"""
         service_account_info = {}
         missing_vars = []
-        
+
         for key, env_var in FIREBASE_ENV_MAPPING.items():
             value = os.getenv(env_var)
             if value:
@@ -293,15 +289,14 @@ class Database:
                 service_account_info[key] = value
             elif key in FIREBASE_REQUIRED_VARS:
                 missing_vars.append(env_var)
-        
+
         if missing_vars:
             logger.warning(f"Missing required environment variables: {missing_vars}")
             return None
-        
-        # Set defaults for optional fields
+
         for key, default_value in FIREBASE_DEFAULTS.items():
             service_account_info.setdefault(key, default_value)
-        
+
         return service_account_info
 
     async def _init_bot_stats_async(self):
@@ -310,14 +305,14 @@ class Database:
             stats_doc = await self._run_in_executor(
                 lambda: self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
             )
-            
+
             if not stats_doc.exists:
                 initial_stats = DEFAULT_BOT_STATS.copy()
                 initial_stats.update({
                     'created_at': datetime.now(),
                     'updated_at': datetime.now()
                 })
-                
+
                 await self._run_in_executor(
                     lambda: self.stats_collection.document(DB_COLLECTIONS['main_stats']).set(initial_stats)
                 )
@@ -329,11 +324,11 @@ class Database:
     async def get_user(self, user_id: int) -> Optional[Dict]:
         """Get user data from Firestore asynchronously"""
         logger.debug(f"Getting user {user_id}")
-        
+
         user_doc = await self._run_in_executor(
             lambda: self.users_collection.document(str(user_id)).get()
         )
-        
+
         if user_doc.exists:
             user_data = user_doc.to_dict()
             user_data['_id'] = user_id
@@ -347,19 +342,19 @@ class Database:
     async def create_user(self, user_id: int, username: str, first_name: str, referred_by: str = None) -> bool:
         """Create new user in Firestore asynchronously"""
         logger.debug(f"Creating user {user_id}")
-        
+
         # Check if user already exists
         existing_check = await self._run_in_executor(
             lambda: self.users_collection.document(str(user_id)).get()
         )
-        
+
         if existing_check.exists:
             logger.info(f"User {user_id} already exists - skipping creation")
             return True
-        
+
         user_data = DEFAULT_USER_DATA.copy()
         referral_code = await self._generate_unique_referral_code()
-        
+
         user_data.update({
             "user_id": user_id,
             "username": username,
@@ -370,29 +365,26 @@ class Database:
             "created_at": datetime.now(),
             "updated_at": datetime.now()
         })
-        
+
         await self._run_in_executor(
             lambda: self.users_collection.document(str(user_id)).set(user_data)
         )
-        
+
         await self._update_stats_async('user_created')
-        
         logger.info(f"User {user_id} created successfully with referral code: {referral_code}")
         if referred_by:
             logger.info(f"User {user_id} was referred by: {referred_by}")
-        
         return True
 
     async def _generate_unique_referral_code(self) -> str:
         """Generate a unique referral code asynchronously"""
         max_attempts = 10
-        
         for _ in range(max_attempts):
             code = generate_referral_code()
             existing_user = await self._get_user_by_referral_code(code)
             if not existing_user:
                 return code
-        
+
         logger.warning("Could not generate unique referral code after maximum attempts")
         return generate_referral_code()
 
@@ -402,7 +394,7 @@ class Database:
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('referral_code', '==', referral_code).limit(1).stream())
             )
-            
+
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
@@ -420,30 +412,30 @@ class Database:
         """Update user's current step and completion status asynchronously"""
         try:
             from constants import TOTAL_STEPS
-            
+
             update_data = {
                 "current_step": step + 1 if completed else step,
                 f"steps_completed.step_{step}": completed,
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
-            # Handle completion
+
             if step == TOTAL_STEPS and completed:
                 await self._update_stats_async('user_completed')
-                
+
                 user_data = await self.get_user(user_id)
                 if user_data:
                     mntc_earned = await self._calculate_and_store_mntc_earned(user_data)
-                    
+
                     if user_data.get('referred_by'):
                         await self._handle_referral_completion(user_data['referred_by'], user_id)
-            
+
             logger.info(f"User {user_id} step {step} updated: {completed}")
             return True
+
         except Exception as e:
             logger.error(f"Error updating user {user_id} step {step}: {e}")
             return False
@@ -453,32 +445,33 @@ class Database:
         try:
             user_id = user_data['user_id']
             is_referred = user_data.get('is_referred', False)
-            
+
             if is_referred:
                 mntc_earned = REFERRAL_CONFIG['referred_reward']
                 logger.info(f"User {user_id} earned {mntc_earned} MNTC (referred user)")
             else:
                 mntc_earned = REFERRAL_CONFIG['normal_reward']
                 logger.info(f"User {user_id} earned {mntc_earned} MNTC (normal user)")
-            
+
             completion_data = {
                 "mntc_earned": mntc_earned,
                 "reward_type": "referred" if is_referred else "normal",
                 "completion_date": datetime.now(),
                 "reward_status": "pending"
             }
-            
+
             update_data = {
                 "reward_info": completion_data,
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
+
             logger.info(f"Stored reward info for user {user_id}: {mntc_earned} MNTC ({completion_data['reward_type']})")
             return mntc_earned
+
         except Exception as e:
             logger.error(f"Error calculating/storing MNTC for user {user_data.get('user_id')}: {e}")
             return 0
@@ -490,18 +483,19 @@ class Database:
             if referrer:
                 referrer_id = referrer['user_id']
                 current_referrals = referrer.get('referral_stats', {}).get('total_referrals', 0)
-                
+
                 update_data = {
                     "referral_stats.total_referrals": current_referrals + 1,
                     "updated_at": datetime.now()
                 }
-                
+
                 await self._run_in_executor(
                     lambda: self.users_collection.document(str(referrer_id)).update(update_data)
                 )
-                
+
                 logger.info(f"Updated referral stats for user {referrer_id}. Total referrals: {current_referrals + 1}")
                 return referrer_id
+
         except Exception as e:
             logger.error(f"Error handling referral completion for {referrer_code}: {e}")
             return None
@@ -514,13 +508,13 @@ class Database:
                 f"verification_status.{platform}": True,
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
             logger.info(f"User {user_id} {platform} username saved: {username}")
             return True
+
         except Exception as e:
             logger.error(f"Error saving {platform} username for user {user_id}: {e}")
             return False
@@ -532,13 +526,13 @@ class Database:
                 "bep20_address": address,
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
             logger.info(f"User {user_id} BEP20 address saved")
             return True
+
         except Exception as e:
             logger.error(f"Error saving BEP20 address for user {user_id}: {e}")
             return False
@@ -551,16 +545,17 @@ class Database:
                 "file_name": file_name,
                 "uploaded_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update({
                     "screenshots": firestore.ArrayUnion([screenshot_data]),
                     "updated_at": datetime.now()
                 })
             )
-            
+
             logger.info(f"Screenshot added for user {user_id}")
             return True
+
         except Exception as e:
             logger.error(f"Error adding screenshot for user {user_id}: {e}")
             return False
@@ -571,7 +566,7 @@ class Database:
             stats_doc = await self._run_in_executor(
                 lambda: self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
             )
-            
+
             if stats_doc.exists:
                 return stats_doc.to_dict()
             else:
@@ -584,7 +579,6 @@ class Database:
         """Update bot statistics asynchronously"""
         try:
             stats_ref = self.stats_collection.document(DB_COLLECTIONS['main_stats'])
-            
             if action == 'user_created':
                 await self._run_in_executor(
                     lambda: stats_ref.update({
@@ -610,13 +604,13 @@ class Database:
                 "reward_info.status_updated_at": datetime.now(),
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
             logger.info(f"Updated reward status for user {user_id}: {status}")
             return True
+
         except Exception as e:
             logger.error(f"Error updating reward status for user {user_id}: {e}")
             return False
@@ -627,12 +621,11 @@ class Database:
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('reward_info.reward_status', '==', 'pending').stream())
             )
-            
+
             pending_users = []
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
-                
                 pending_users.append({
                     'user_id': user_data['user_id'],
                     'first_name': user_data.get('first_name', 'Unknown'),
@@ -643,8 +636,9 @@ class Database:
                     'bep20_address': user_data.get('bep20_address', 'Not provided'),
                     'social_usernames': user_data.get('social_usernames', {})
                 })
-            
+
             return pending_users
+
         except Exception as e:
             logger.error(f"Error getting pending rewards: {e}")
             return []
@@ -655,12 +649,11 @@ class Database:
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('reward_info.reward_status', '==', 'paid').stream())
             )
-            
+
             paid_users = []
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
-                
                 paid_users.append({
                     'user_id': user_data['user_id'],
                     'first_name': user_data.get('first_name', 'Unknown'),
@@ -671,8 +664,9 @@ class Database:
                     'status_updated_at': user_data.get('reward_info', {}).get('status_updated_at'),
                     'bep20_address': user_data.get('bep20_address', 'Not provided')
                 })
-            
+
             return paid_users
+
         except Exception as e:
             logger.error(f"Error getting paid rewards: {e}")
             return []
@@ -683,33 +677,33 @@ class Database:
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('current_step', '>', 6).stream())
             )
-            
+
             total_users = 0
             total_mntc_pending = 0
             total_mntc_paid = 0
             referred_users = 0
             normal_users = 0
-            
+
             for doc in docs:
                 user_data = doc.to_dict()
                 reward_info = user_data.get('reward_info', {})
-                
+
                 if reward_info:
                     total_users += 1
                     mntc_earned = reward_info.get('mntc_earned', 0)
                     reward_status = reward_info.get('reward_status', 'pending')
                     reward_type = reward_info.get('reward_type', 'normal')
-                    
+
                     if reward_status == 'pending':
                         total_mntc_pending += mntc_earned
                     elif reward_status == 'paid':
                         total_mntc_paid += mntc_earned
-                    
+
                     if reward_type == 'referred':
                         referred_users += 1
                     else:
                         normal_users += 1
-            
+
             return {
                 'total_completed_users': total_users,
                 'normal_users': normal_users,
@@ -718,6 +712,7 @@ class Database:
                 'total_mntc_paid': total_mntc_paid,
                 'total_mntc_issued': total_mntc_pending + total_mntc_paid
             }
+
         except Exception as e:
             logger.error(f"Error getting reward summary: {e}")
             return {}
@@ -746,13 +741,13 @@ class Database:
             else:
                 reset_data = DEFAULT_USER_DATA.copy()
                 reset_data["updated_at"] = datetime.now()
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(reset_data)
             )
-            
             logger.info(f"User {user_id} progress reset (keep_referral_data: {keep_referral_data})")
             return True
+
         except Exception as e:
             logger.error(f"Error resetting user {user_id} progress: {e}")
             return False
@@ -764,13 +759,13 @@ class Database:
                 "referral_stats.total_rewards": total_rewards,
                 "updated_at": datetime.now()
             }
-            
+
             await self._run_in_executor(
                 lambda: self.users_collection.document(str(user_id)).update(update_data)
             )
-            
             logger.info(f"Updated referral rewards for user {user_id}: {total_rewards} MNTC")
             return True
+
         except Exception as e:
             logger.error(f"Error updating referral rewards for user {user_id}: {e}")
             return False
@@ -788,6 +783,7 @@ class Database:
                     "referred_by": user_data.get('referred_by')
                 }
             return None
+
         except Exception as e:
             logger.error(f"Error getting referral stats for user {user_id}: {e}")
             return None
@@ -797,18 +793,19 @@ class Database:
         try:
             if limit is None:
                 limit = RATE_LIMITS['max_users_query']
-            
+
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.limit(limit).stream())
             )
-            
+
             users = []
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
                 users.append(user_data)
-            
+
             return users
+
         except Exception as e:
             logger.error(f"Error getting all users: {e}")
             return []
@@ -817,20 +814,20 @@ class Database:
         """Get multiple users in batch asynchronously"""
         if not user_ids:
             return {}
-        
+
         # Split into batches of 10 (Firestore limit for batch get)
         batch_size = 10
         all_results = {}
-        
+
         for i in range(0, len(user_ids), batch_size):
             batch_ids = user_ids[i:i + batch_size]
             batch_refs = [self.users_collection.document(str(uid)) for uid in batch_ids]
-            
+
             try:
                 batch_docs = await self._run_in_executor(
                     lambda refs=batch_refs: self.db.get_all(refs)
                 )
-                
+
                 for doc, user_id in zip(batch_docs, batch_ids):
                     if doc.exists:
                         user_data = doc.to_dict()
@@ -838,6 +835,7 @@ class Database:
                         all_results[user_id] = user_data
                     else:
                         all_results[user_id] = None
+
             except Exception as e:
                 logger.error(f"Error in batch get for users {batch_ids}: {e}")
                 # Fall back to individual gets for this batch
@@ -848,34 +846,35 @@ class Database:
                     except Exception as inner_e:
                         logger.error(f"Error getting user {user_id} individually: {inner_e}")
                         all_results[user_id] = None
-        
+
         return all_results
 
     async def batch_update_users(self, updates: List[Dict]) -> bool:
         """Batch update multiple users asynchronously"""
         if not updates:
             return True
-        
+
         try:
             # Split into batches of 500 (Firestore limit)
             batch_size = 500
-            
+
             for i in range(0, len(updates), batch_size):
                 batch_updates = updates[i:i + batch_size]
                 batch = self.db.batch()
-                
+
                 for update in batch_updates:
                     user_id = update['user_id']
                     update_data = update['data']
                     update_data['updated_at'] = datetime.now()
-                    
+
                     doc_ref = self.users_collection.document(str(user_id))
                     batch.update(doc_ref, update_data)
-                
+
                 await self._run_in_executor(lambda b=batch: b.commit())
                 logger.info(f"Batch updated {len(batch_updates)} users")
-            
+
             return True
+
         except Exception as e:
             logger.error(f"Error in batch update: {e}")
             return False
@@ -884,34 +883,34 @@ class Database:
         """Get users with pagination for large datasets"""
         try:
             query = self.users_collection.order_by('user_id').limit(page_size)
-            
+
             if start_after_id:
                 start_doc = await self._run_in_executor(
                     lambda: self.users_collection.document(start_after_id).get()
                 )
-                
                 if start_doc.exists:
                     query = query.start_after(start_doc)
-            
+
             docs = await self._run_in_executor(lambda: list(query.stream()))
-            
+
             users = []
             last_doc_id = None
-            
+
             for doc in docs:
                 user_data = doc.to_dict()
                 user_data['_id'] = doc.id
                 users.append(user_data)
                 last_doc_id = doc.id
-            
+
             has_more = len(users) == page_size
-            
+
             return {
                 'users': users,
                 'has_more': has_more,
                 'last_doc_id': last_doc_id,
                 'count': len(users)
             }
+
         except Exception as e:
             logger.error(f"Error in paginated get: {e}")
             return {'users': [], 'has_more': False, 'last_doc_id': None, 'count': 0}
@@ -920,16 +919,16 @@ class Database:
         """Bulk create multiple users asynchronously"""
         if not user_data_list:
             return {'success': 0, 'failed': 0, 'errors': []}
-        
+
         results = {'success': 0, 'failed': 0, 'errors': []}
-        
+
         # Process in chunks to avoid overwhelming the system
         chunk_size = 100
-        
+
         for i in range(0, len(user_data_list), chunk_size):
             chunk = user_data_list[i:i + chunk_size]
             tasks = []
-            
+
             for user_data in chunk:
                 task = self.create_user(
                     user_data['user_id'],
@@ -938,10 +937,10 @@ class Database:
                     user_data.get('referred_by')
                 )
                 tasks.append(task)
-            
+
             # Execute chunk concurrently
             chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for j, result in enumerate(chunk_results):
                 if isinstance(result, Exception):
                     results['failed'] += 1
@@ -957,10 +956,10 @@ class Database:
                         'user_id': chunk[j]['user_id'],
                         'error': 'Unknown error'
                     })
-            
+
             # Small delay between chunks to be nice to Firebase
             await asyncio.sleep(0.1)
-        
+
         logger.info(f"Bulk create results: {results['success']} success, {results['failed']} failed")
         return results
 
@@ -972,15 +971,16 @@ class Database:
                 self.get_reward_summary(),
                 self._get_referral_summary()
             ]
-            
+
             user_stats, reward_summary, referral_summary = await asyncio.gather(*tasks)
-            
+
             return {
                 'user_stats': user_stats,
                 'reward_summary': reward_summary,
                 'referral_summary': referral_summary,
                 'generated_at': datetime.now()
             }
+
         except Exception as e:
             logger.error(f"Error getting stats summary: {e}")
             return {}
@@ -992,23 +992,24 @@ class Database:
             docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('referral_stats.total_referrals', '>', 0).stream())
             )
-            
+
             total_referrers = len(docs)
             total_referrals = sum(doc.to_dict().get('referral_stats', {}).get('total_referrals', 0) for doc in docs)
-            
+
             # Get referred users count
             referred_docs = await self._run_in_executor(
                 lambda: list(self.users_collection.where('is_referred', '==', True).stream())
             )
-            
+
             total_referred_users = len(referred_docs)
-            
+
             return {
                 'total_referrers': total_referrers,
                 'total_referrals': total_referrals,
                 'total_referred_users': total_referred_users,
                 'average_referrals_per_referrer': total_referrals / total_referrers if total_referrers > 0 else 0
             }
+
         except Exception as e:
             logger.error(f"Error getting referral summary: {e}")
             return {}
