@@ -41,12 +41,12 @@ validators = None
 def initialize_services():
     """Initialize database and validators with proper error handling"""
     global db, validators
-    
+
     try:
         # Initialize validators first (no external dependencies)
         validators = Validators()
         logger.info("✅ Validators initialized successfully")
-        
+
         # Initialize database with retry logic
         max_retries = 3
         for attempt in range(max_retries):
@@ -61,9 +61,9 @@ def initialize_services():
                 else:
                     logger.error(f"❌ Failed to initialize database after {max_retries} attempts: {e}")
                     raise
-        
+
         return db, validators
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         raise
@@ -103,14 +103,14 @@ class MinatiVaultBot:
         user_id = user.id
         username = user.username or "No username"
         first_name = user.first_name or "User"
-        
+
         # Rate limiting - prevent spam start commands
         current_time = datetime.now()
-        if (self._last_start_time and self._last_start_user == user_id and 
+        if (self._last_start_time and self._last_start_user == user_id and
             (current_time - self._last_start_time).total_seconds() < 5):
             logger.warning(f"Rate limited /start from user {user_id}")
             return
-        
+
         self._last_start_time = current_time
         self._last_start_user = user_id
 
@@ -128,10 +128,10 @@ class MinatiVaultBot:
         # Enhanced user existence check with retries
         existing_user = None
         max_retries = 3
-        
+
         for attempt in range(max_retries):
             try:
-                existing_user = self.db.get_user_with_retry(user_id)
+                existing_user = await self.db.get_user(user_id)
                 break  # Success, exit retry loop
             except Exception as e:
                 logger.warning(f"Database get_user attempt {attempt + 1} failed for user {user_id}: {e}")
@@ -148,12 +148,12 @@ class MinatiVaultBot:
         if not existing_user:
             # NEW USER - Apply referral logic
             logger.info(f"Creating new user {user_id}")
-            
+
             referred_by = None
             if referral_code:
                 # Validate referral code exists and get referrer
                 try:
-                    referrer = self.db.get_user_by_referral_code(referral_code)
+                    referrer = await self.db.get_user_by_referral_code(referral_code)
                     if referrer:
                         if referrer['user_id'] == user_id:
                             # User trying to use their own referral code
@@ -177,8 +177,8 @@ class MinatiVaultBot:
 
             # Attempt to create user with enhanced error handling
             try:
-                creation_success = self.db.create_user_with_retry(user_id, username, first_name, referred_by)
-                
+                creation_success = await self.db.create_user(user_id, username, first_name, referred_by)
+
                 if creation_success:
                     welcome_msg = WELCOME_MESSAGE_REFERRED if referred_by else WELCOME_MESSAGE
                     await update.message.reply_text(
@@ -188,7 +188,7 @@ class MinatiVaultBot:
                 else:
                     # User creation failed - check if user now exists (race condition)
                     try:
-                        recheck_user = self.db.get_user_with_retry(user_id)
+                        recheck_user = await self.db.get_user(user_id)
                         if recheck_user:
                             # User was created by another process, continue normally
                             logger.info(f"User {user_id} was created by another process")
@@ -214,7 +214,7 @@ class MinatiVaultBot:
                         await update.message.reply_text(
                             f"{EMOJIS['cross']} Technical issue occurred. Please contact support: @Minatirewards"
                         )
-            
+
             except Exception as e:
                 logger.error(f"Exception during user creation for {user_id}: {e}")
                 await update.message.reply_text(
@@ -225,10 +225,10 @@ class MinatiVaultBot:
         else:
             # EXISTING USER - Enhanced handling
             logger.info(f"Existing user {user_id} accessed bot")
-            
+
             try:
                 current_step = existing_user.get('current_step', 1)
-                
+
                 # If user clicked referral link but already exists, ignore referral and show message
                 if referral_code:
                     await update.message.reply_text(
@@ -250,7 +250,7 @@ class MinatiVaultBot:
                 else:
                     # Show current step
                     await self.show_step(update, context, current_step)
-                    
+
             except Exception as e:
                 logger.error(f"Error handling existing user {user_id}: {e}")
                 await update.message.reply_text(
@@ -264,7 +264,6 @@ class MinatiVaultBot:
 
         keyboard = [
             [InlineKeyboardButton(f"{EMOJIS['stats']} View Status", callback_data=CALLBACK_DATA['show_status'])],
-            # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
         ]
 
@@ -299,7 +298,7 @@ Share your referral link to earn more rewards! 💰
     async def show_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, step: int):
         """Show current step with proper validation buttons"""
         if step > TOTAL_STEPS:
-            user_data = self.db.get_user_with_retry(update.effective_user.id)
+            user_data = await self.db.get_user(update.effective_user.id)
             if user_data:
                 await self.show_completion_with_referral(update, user_data)
             else:
@@ -342,7 +341,7 @@ Share your referral link to earn more rewards! 💰
             ]
         elif step == 6:
             # Check if user has all required data before allowing completion
-            user_data = self.db.get_user_with_retry(update.effective_user.id)
+            user_data = await self.db.get_user(update.effective_user.id)
             can_complete = True
             missing_fields = []
 
@@ -392,7 +391,7 @@ Share your referral link to earn more rewards! 💰
         await query.answer()
 
         user_id = query.from_user.id
-        user_data = self.db.get_user_with_retry(user_id)
+        user_data = await self.db.get_user(user_id)
 
         if not user_data:
             await query.edit_message_text(MESSAGE_TEMPLATES['user_not_found'])
@@ -403,9 +402,9 @@ Share your referral link to earn more rewards! 💰
         # Step 1 verification
         if query.data == CALLBACK_DATA['verify_step_1']:
             if current_step == 1:
-                self.db.update_user_step(user_id, 1, True)
+                await self.db.update_user_step(user_id, 1, True)
                 await query.edit_message_text(f"{EMOJIS['checkmark']} Great! App download confirmed.\n\nMoving to next step...")
-                
+
                 # Send Step 2 as a new message
                 step_message = STEPS.get(2, "Invalid step")
                 keyboard = [
@@ -431,8 +430,8 @@ Share your referral link to earn more rewards! 💰
 
             if current_step == 6:
                 logger.info(f"User {user_id} completing step 6")
-                self.db.update_user_step(user_id, 6, True)
-                fresh_user_data = self.db.get_user_with_retry(user_id)
+                await self.db.update_user_step(user_id, 6, True)
+                fresh_user_data = await self.db.get_user(user_id)
                 await self.send_completion_message(query, fresh_user_data)
             elif current_step > 6:
                 logger.info(f"User {user_id} already completed, showing completion again")
@@ -455,12 +454,12 @@ Share your referral link to earn more rewards! 💰
 
         # Show status
         elif query.data == CALLBACK_DATA['show_status']:
-            fresh_user_data = self.db.get_user_with_retry(user_id)
+            fresh_user_data = await self.db.get_user(user_id)
             await self.show_status_callback(query, fresh_user_data)
 
         # Show referral stats
         elif query.data == CALLBACK_DATA['show_referral']:
-            fresh_user_data = self.db.get_user_with_retry(user_id)
+            fresh_user_data = await self.db.get_user(user_id)
             await self.show_referral_stats_callback(query, fresh_user_data)
 
         # Help
@@ -566,7 +565,7 @@ Thank you for using Minati Vault Bot! 🚀
             if not referrer_code:
                 return
 
-            referrer = self.db.get_user_by_referral_code(referrer_code)
+            referrer = await self.db.get_user_by_referral_code(referrer_code)
             if not referrer:
                 return
 
@@ -637,7 +636,7 @@ Thank you for using Minati Vault Bot! 🚀
 • Status: {STATUS_ICONS['referred'] if is_referred else STATUS_ICONS['normal']}
 • Your Referrals: {int(referral_stats['total_referrals'])}
 • Total Referral Rewards: {referral_stats['total_referrals']*2} MNTC
-• Total Recieved Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
+• Total Received Referral Rewards: **{referral_stats['total_rewards']*2} MNTC**
 
 *Reward Information:*
 • MNTC Earned: {reward_info.get('mntc_earned', 0)} MNTC
@@ -647,7 +646,6 @@ Thank you for using Minati Vault Bot! 🚀
 *Need Changes?* @Minatirewards
 """
             keyboard = [
-                # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
                 [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])]
             ]
         else:
@@ -668,12 +666,10 @@ Thank you for using Minati Vault Bot! 🚀
                 referral_stats['total_referrals'],
                 referral_stats['total_rewards'],
                 reward_info.get('mntc_earned', 0),
-                STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), '❌ Not Completed'),
+                STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), 'β Correct'),
                 MESSAGE_TEMPLATES['all_completed'] if current_step > TOTAL_STEPS else f"Continue with Step {current_step}"
             )
-            keyboard = [
-                # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
-            ]
+            keyboard = []
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -687,7 +683,7 @@ Thank you for using Minati Vault Bot! 🚀
         """Handle text messages with enhanced validation"""
         user_id = update.effective_user.id
         message_text = update.message.text.strip()
-        user_data = self.db.get_user_with_retry(user_id)
+        user_data = await self.db.get_user(user_id)
 
         if not user_data:
             await update.message.reply_text(f"{EMOJIS['cross']} Please use /start command first.")
@@ -703,8 +699,8 @@ Thank you for using Minati Vault Bot! 🚀
             if is_valid:
                 is_follower = await self.verify_social_follow('twitter', username)
                 if is_follower:
-                    if self.db.save_social_username(user_id, 'twitter', username):
-                        self.db.update_user_step(user_id, 2, True)
+                    if await self.db.save_social_username(user_id, 'twitter', username):
+                        await self.db.update_user_step(user_id, 2, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *Twitter Verified!*\n\n"
                             f"Username: @{username}\n"
@@ -740,8 +736,8 @@ Thank you for using Minati Vault Bot! 🚀
             if is_valid:
                 is_follower = await self.verify_social_follow('instagram', username)
                 if is_follower:
-                    if self.db.save_social_username(user_id, 'instagram', username):
-                        self.db.update_user_step(user_id, 3, True)
+                    if await self.db.save_social_username(user_id, 'instagram', username):
+                        await self.db.update_user_step(user_id, 3, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *Instagram Verified!*\n\n"
                             f"Username: @{username}\n"
@@ -777,8 +773,8 @@ Thank you for using Minati Vault Bot! 🚀
             if is_valid:
                 is_follower = await self.verify_social_follow('coinmarketcap', userid)
                 if is_follower:
-                    if self.db.save_social_username(user_id, 'coinmarketcap', userid):
-                        self.db.update_user_step(user_id, 4, True)
+                    if await self.db.save_social_username(user_id, 'coinmarketcap', userid):
+                        await self.db.update_user_step(user_id, 4, True)
                         await update.message.reply_text(
                             f"{EMOJIS['checkmark']} *CoinMarketCap Verified!*\n\n"
                             f"User ID: {userid}\n"
@@ -811,8 +807,8 @@ Thank you for using Minati Vault Bot! 🚀
             is_valid, message = self.validators.validate_bep20_address(message_text)
 
             if is_valid:
-                if self.db.save_bep20_address(user_id, message_text):
-                    self.db.update_user_step(user_id, 5, True)
+                if await self.db.save_bep20_address(user_id, message_text):
+                    await self.db.update_user_step(user_id, 5, True)
                     await update.message.reply_text(
                         f"{EMOJIS['checkmark']} *BEP20 Address Saved!*\n\n"
                         f"Address: `{message_text}`\n\n"
@@ -840,7 +836,7 @@ Thank you for using Minati Vault Bot! 🚀
     async def referral_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show referral statistics and link"""
         user_id = update.effective_user.id
-        user_data = self.db.get_user_with_retry(user_id)
+        user_data = await self.db.get_user(user_id)
 
         if not user_data:
             await update.message.reply_text(MESSAGE_TEMPLATES['user_not_found'])
@@ -872,7 +868,7 @@ Thank you for using Minati Vault Bot! 🚀
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Status command with verification info and referral stats"""
         user_id = update.effective_user.id
-        user_data = self.db.get_user_with_retry(user_id)
+        user_data = await self.db.get_user(user_id)
 
         if not user_data:
             await update.message.reply_text(MESSAGE_TEMPLATES['user_not_found'])
@@ -903,12 +899,11 @@ Thank you for using Minati Vault Bot! 🚀
             referral_stats['total_referrals'],
             referral_stats['total_rewards'],
             reward_info.get('mntc_earned', 0),
-            STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), '❌ Not Completed'),
+            STATUS_ICONS.get(reward_info.get('reward_status', 'not_completed_reward'), 'β Correct'),
             MESSAGE_TEMPLATES['all_completed'] if current_step > TOTAL_STEPS else f"Continue with Step {current_step}"
         )
 
         keyboard = [
-            # [InlineKeyboardButton(f"{EMOJIS['gift']} Referral Stats", callback_data=CALLBACK_DATA['show_referral'])],
             [InlineKeyboardButton(f"{EMOJIS['globe']} Website", url=SOCIAL_LINKS['website'])],
             [InlineKeyboardButton(f"{EMOJIS['coinmarketcap']} CoinMarketCap", url=SOCIAL_LINKS['coinmarketcap'])],
         ]
@@ -933,7 +928,6 @@ Thank you for using Minati Vault Bot! 🚀
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Updated help text with +2 MNTC referrer bonus
         help_text = f"""
 🆘 *Minati Vault Bot Help*
 
@@ -945,7 +939,7 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Verification Process:*
 ✅ Username collection for Twitter, Instagram & CoinMarketCap
-🔐 Address validation for BEP20 wallet
+🔍 Address validation for BEP20 wallet
 
 *Referral System:*
 💰 Earn +2 MNTC for each successful referral
@@ -974,7 +968,7 @@ Use the buttons below for instant access to our platforms
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show bot statistics"""
         try:
-            stats = self.db.get_user_stats()
+            stats = await self.db.get_user_stats()
             total_users = stats.get('total_users', 0)
             completed_users = stats.get('completed_users', 0)
             completion_rate = (completed_users / total_users * 100) if total_users > 0 else 0
@@ -995,20 +989,20 @@ Use the buttons below for instant access to our platforms
     async def health_check_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Admin command to check database health"""
         user_id = update.effective_user.id
-        
+
         # Only allow admin users (add your admin user IDs)
         ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
-        
+
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
             return
-        
+
         try:
-            health = self.db.health_check()
-            
+            health = await self.db.health_check()
+
             status_emoji = "✅" if health['status'] == 'healthy' else "❌"
             circuit_status = "🔴 OPEN" if health.get('circuit_breaker_open') else "🟢 CLOSED"
-            
+
             health_message = f"""
 {status_emoji} **Database Health Check**
 
@@ -1017,24 +1011,21 @@ Use the buttons below for instant access to our platforms
 **Connection Failures:** {health.get('connection_failures', 0)}
 **Last Check:** {health['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}
 """
-            
+
             if health['status'] != 'healthy':
                 health_message += f"\n**Error:** {health.get('error', 'Unknown')}"
-            
+
             await update.message.reply_text(health_message, parse_mode='Markdown')
-            
+
         except Exception as e:
             await update.message.reply_text(f"❌ Health check failed: {e}")
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
-        """Enhanced error handler with conflict resolution"""
+        """Enhanced error handler"""
         logger.error(f'Update {update} caused error {context.error}')
 
         # Handle specific error types
-        if isinstance(context.error, Conflict):
-            logger.error("❌ CONFLICT ERROR: Bot token is being used by another instance!")
-            logger.error("💡 Solution: Stop other instances or delete webhook")
-        elif isinstance(context.error, NetworkError):
+        if isinstance(context.error, NetworkError):
             logger.warning("⚠️ Network error occurred, retrying...")
         elif isinstance(context.error, TimedOut):
             logger.warning("⏱️ Request timed out")
@@ -1062,56 +1053,13 @@ Use the buttons below for instant access to our platforms
         # Error handler
         self.application.add_error_handler(self.error_handler)
 
-    async def cleanup_telegram_bot(self):
-        """Clean up Telegram bot connections and webhooks"""
+    async def start_polling(self):
+        """Start the bot with polling for Render Background Worker"""
         try:
-            logger.info("🧹 Cleaning up Telegram bot connections...")
-            
-            # Create temporary application for cleanup
-            temp_app = Application.builder().token(config.BOT_TOKEN).build()
-            
-            try:
-                # Initialize the application
-                await temp_app.initialize()
-                
-                # Delete webhook if exists (this can cause conflicts with polling)
-                try:
-                    await temp_app.bot.delete_webhook(drop_pending_updates=True)
-                    logger.info("✅ Webhook deleted successfully")
-                except Exception as e:
-                    logger.warning(f"⚠️ Webhook deletion failed (may not exist): {e}")
-                
-                # Get bot info to verify connection
-                bot_info = await temp_app.bot.get_me()
-                logger.info(f"✅ Bot connection verified: @{bot_info.username}")
-                
-            except Conflict as e:
-                logger.error(f"❌ CONFLICT: {e}")
-                logger.error("💡 Another instance is using this bot token!")
-                raise
-            except Exception as e:
-                logger.warning(f"⚠️ Bot cleanup warning: {e}")
-            finally:
-                # Always shutdown temp application
-                try:
-                    await temp_app.shutdown()
-                except:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"❌ Bot cleanup failed: {e}")
-            raise
-
-    async def start_bot(self):
-        """Start the bot with enhanced conflict resolution"""
-        try:
-            logger.info(f"{EMOJIS['rocket']} Starting Minati Vault Bot with Enhanced Error Handling...")
+            logger.info(f"🚀 Starting Minati Vault Bot as Background Worker...")
 
             # Initialize services first
             await self.initialize_services_async()
-
-            # Clean up any existing connections
-            await self.cleanup_telegram_bot()
 
             # Create application
             self.application = Application.builder().token(config.BOT_TOKEN).build()
@@ -1119,61 +1067,32 @@ Use the buttons below for instant access to our platforms
             # Setup handlers
             self.setup_handlers()
 
-            logger.info(f"{EMOJIS['checkmark']} Bot handlers configured")
-            logger.info(f"{EMOJIS['fire']} Firebase connection: Ready")
-            logger.info(f"🆔 Firebase Project: {config.FIREBASE_PROJECT_ID}")
-            logger.info(f"{EMOJIS['stats']} Enhanced validation features: ACTIVE")
-            logger.info(f"{EMOJIS['gift']} Referral system: ACTIVE")
-            logger.info(f"{EMOJIS['target']} Starting polling...")
+            logger.info(f"✅ Bot handlers configured")
+            logger.info(f"🔥 Firebase connection: Ready")
+            logger.info(f"🏆 Firebase Project: {config.FIREBASE_PROJECT_ID}")
+            logger.info(f"📊 Enhanced validation features: ACTIVE")
+            logger.info(f"🎁 Referral system: ACTIVE")
+            logger.info(f"🎯 Starting polling for Background Worker...")
 
-            self.running = True
-
-            # Initialize the application with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    await self.application.initialize()
-                    await self.application.start()
-                    break
-                except Conflict as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Conflict on attempt {attempt + 1}, retrying in 5 seconds...")
-                        await asyncio.sleep(5)
-                        await self.cleanup_telegram_bot()
-                    else:
-                        raise
+            # Initialize the application
+            await self.application.initialize()
+            await self.application.start()
 
             # Start polling with enhanced error handling
-            try:
-                await self.application.updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True  # Drop pending updates to avoid conflicts
-                )
-                logger.info(f"{EMOJIS['checkmark']} Bot started successfully!")
+            await self.application.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
 
-                # Keep the bot running
-                while self.running:
-                    await asyncio.sleep(1)
+            logger.info(f"✅ Bot started successfully as Background Worker!")
+            self.running = True
 
-            except Conflict as e:
-                logger.error(f"❌ POLLING CONFLICT: {e}")
-                logger.error("💡 SOLUTION: Another instance is running or webhook is set!")
-                logger.error("🔧 Try: 1) Stop other instances 2) Delete webhook manually")
-                raise
-
-        except Conflict as e:
-            logger.error(f"❌ TELEGRAM CONFLICT ERROR: {e}")
-            logger.error("=" * 60)
-            logger.error("🚨 CONFLICT RESOLUTION STEPS:")
-            logger.error("1. Check if another instance of this bot is running")
-            logger.error("2. Check if webhook is set (conflicts with polling)")
-            logger.error("3. Wait 1-2 minutes and try again")
-            logger.error("4. Use BotFather to revoke and regenerate token if needed")
-            logger.error("=" * 60)
-            sys.exit(1)
+            # Keep the bot running
+            while self.running:
+                await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error(f"❌ Error starting bot: {e}")
+            logger.error(f"❌ Error starting Background Worker: {e}")
             raise
 
         finally:
@@ -1181,9 +1100,9 @@ Use the buttons below for instant access to our platforms
                 await self.stop_bot()
 
     async def stop_bot(self):
-        """Stop the bot gracefully with enhanced cleanup"""
+        """Stop the bot gracefully"""
         try:
-            logger.info(f"{EMOJIS['stop']} Stopping bot gracefully...")
+            logger.info(f"🛑 Stopping bot gracefully...")
             self.running = False
 
             if self.application:
@@ -1209,12 +1128,12 @@ Use the buttons below for instant access to our platforms
             # Close database connection
             if self.db:
                 try:
-                    self.db.close_connection()
+                    await self.db.close_connection()
                     logger.info("✅ Database connection closed")
                 except Exception as e:
                     logger.warning(f"⚠️ Database close warning: {e}")
 
-            logger.info(f"{EMOJIS['checkmark']} Bot stopped gracefully")
+            logger.info(f"✅ Bot stopped gracefully")
 
         except Exception as e:
             logger.error(f"❌ Error stopping bot: {e}")
@@ -1224,21 +1143,19 @@ Use the buttons below for instant access to our platforms
         logger.info(f"📡 Received signal {sig}, shutting down...")
         self.running = False
 
-# Main execution
+# Main execution for Render Background Worker
 async def main():
-    """Main function to run the bot with enhanced error handling"""
-    
-    # Enhanced configuration validation
+    """Main function for Render Background Worker deployment"""
+
+    # Configuration validation
     logger.info("🔍 Validating configuration...")
-    
+
     if not config.BOT_TOKEN:
-        logger.error(f"{EMOJIS['cross']} BOT_TOKEN not found in environment variables!")
-        logger.error("💡 Set BOT_TOKEN in your .env file or environment")
+        logger.error("❌ BOT_TOKEN not found!")
         sys.exit(1)
 
     if not config.FIREBASE_PROJECT_ID:
-        logger.error(f"{EMOJIS['cross']} FIREBASE_PROJECT_ID not found in environment variables!")
-        logger.error("💡 Set FIREBASE_PROJECT_ID in your .env file or environment")
+        logger.error("❌ FIREBASE_PROJECT_ID not found!")
         sys.exit(1)
 
     logger.info("✅ Configuration validated successfully")
@@ -1255,38 +1172,24 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        await bot.start_bot()
+        await bot.start_polling()
     except KeyboardInterrupt:
-        logger.info(f"{EMOJIS['fire']} Bot stopped by user (Ctrl+C)")
-    except Conflict as e:
-        logger.error(f"{EMOJIS['cross']} CONFLICT ERROR: {e}")
-        logger.error("🔧 Please resolve the conflict and try again")
-        sys.exit(1)
+        logger.info(f"🔥 Bot stopped by user (Ctrl+C)")
     except Exception as e:
-        logger.error(f"{EMOJIS['cross']} Fatal error: {e}")
+        logger.error(f"❌ Fatal error: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
     try:
         # Check for existing processes
         pid = os.getpid()
-        logger.info(f"🚀 Starting Minati Vault Bot (PID: {pid})")
-        
+        logger.info(f"🚀 Starting Minati Vault Bot as Background Worker (PID: {pid})")
+
         # Run the bot
         asyncio.run(main())
-        
+
     except KeyboardInterrupt:
-        logger.info(f"{EMOJIS['fire']} Bot interrupted by user")
-    except Conflict as e:
-        logger.error(f"{EMOJIS['cross']} TELEGRAM BOT CONFLICT: {e}")
-        logger.error("🔧 RESOLUTION: Stop other instances or delete webhook")
-        sys.exit(1)
+        logger.info(f"🔥 Bot interrupted by user")
     except Exception as e:
-        logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
+        logger.error(f"❌ Fatal startup error: {e}")
         sys.exit(1)
-
-
-
-
-
-
