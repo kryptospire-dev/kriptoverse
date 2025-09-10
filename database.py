@@ -109,7 +109,7 @@ class Database:
         
         # Memory optimization and caching
         self._referral_cache = ReferralCache(max_size=1000)
-        self._user_cache = weakref.WeakValueDictionary()
+        self._user_cache = {}
         self._cache_ttl = 300  # 5 minutes
         self._cache_timestamps = {}
         
@@ -1111,3 +1111,4 @@ class Database:
         """Close database connection and cleanup resources"""
         asyncio.create_task(self.clear_cache())
         logger.info("Database connection closed and caches cleared")
+
