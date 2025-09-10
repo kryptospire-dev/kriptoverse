@@ -1,17 +1,3 @@
-import os
-from dotenv import load_dotenv
-from constants import (
-    DEFAULT_FIREBASE_PROJECT_ID,
-    DEFAULT_FIREBASE_SERVICE_ACCOUNT_PATH,
-    DEFAULT_CUSTOMER_CARE_USERNAME,
-    SOCIAL_LINKS,
-    WELCOME_MESSAGE,
-    WELCOME_MESSAGE_REFERRED,
-    STEPS,
-    LOGGING_CONFIG,
-    REFERRAL_CONFIG
-)
-
 # Load environment variables
 import os
 from dotenv import load_dotenv
@@ -103,3 +89,4 @@ if IS_RENDER:
     print(f"🌐 Environment: Render (Memory limit: {MEMORY_LIMIT_MB}MB)")
 if IS_PRODUCTION:
     print(f"🚀 Mode: Production")
+
