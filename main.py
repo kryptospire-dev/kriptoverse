@@ -34,22 +34,21 @@ from constants import (
 logging.config.dictConfig(config.LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
-# Rate limiting
+# Rate limiter
 class RateLimiter:
     def __init__(self, max_requests: int, time_window: int):
         self.max_requests = max_requests
         self.time_window = time_window
         self.requests = {}
         self.lock = asyncio.Lock()
-
     async def is_allowed(self, user_id: int) -> bool:
         async with self.lock:
             now = time.time()
-            # clean up
-            self.requests = {
-                uid: [t for t in times if t > now - self.time_window]
-                for uid, times in self.requests.items()
-            }
+            # cleanup old
+            for uid, times in list(self.requests.items()):
+                self.requests[uid] = [t for t in times if t > now - self.time_window]
+                if not self.requests[uid]:
+                    del self.requests[uid]
             times = self.requests.get(user_id, [])
             if len(times) >= self.max_requests:
                 return False
@@ -57,8 +56,8 @@ class RateLimiter:
             self.requests[user_id] = times
             return True
 
-start_rate_limiter = RateLimiter(max_requests=10, time_window=60)
-global_rate_limiter = RateLimiter(max_requests=50, time_window=60)
+start_rate_limiter = RateLimiter(10, 60)
+global_rate_limiter = RateLimiter(50, 60)
 
 async def initialize_services():
     global db, validators
@@ -92,8 +91,8 @@ class MinatiVaultBot:
 
     async def _check_global_rate_limit(self, user_id: int) -> bool:
         if not await global_rate_limiter.is_allowed(user_id):
-            logger.warning(f"Global rate limit exceeded for {user_id}")
             self._performance_metrics['rate_limited_requests'] += 1
+            logger.warning(f"Global rate limit exceeded for user {user_id}")
             return False
         return True
 
@@ -115,204 +114,185 @@ class MinatiVaultBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_time = time.time()
         user = update.effective_user
-        user_id = user.id
+        uid = user.id
         first_name = user.first_name or "User"
 
         async with self._operation_semaphore:
-            if not await self._check_start_rate_limit(user_id):
-                return
-            if not await self._check_global_rate_limit(user_id):
-                await update.message.reply_text(
-                    f"{EMOJIS['warning']} Too many requests. Try again later.",
-                    parse_mode='Markdown'
-                )
+            if not await self._check_start_rate_limit(uid): return
+            if not await self._check_global_rate_limit(uid):
+                await update.message.reply_text(f"{EMOJIS['warning']} Too many requests. Try later.", parse_mode='Markdown')
+                await self._update_perf(time.time()-start_time, False)
                 return
 
-            # referral extraction
+            # extract referral
             referral_code = None
             if context.args:
                 arg = context.args[0]
                 if self.validators.is_valid_referral_link_param(arg):
                     referral_code = self.validators.extract_referral_code_from_start_param(arg)
 
-            existing_user = None
+            # get existing
+            existing = None
             for _ in range(3):
-                existing_user = await self.db.get_user_with_retry(user_id)
-                if existing_user is not None:
-                    break
+                existing = await self.db.get_user_with_retry(uid)
+                if existing is not None: break
                 await asyncio.sleep(1)
 
-            if not existing_user:
+            if not existing:
+                # new user flow
                 referred_by = None
                 if referral_code:
                     ref = await self.db.get_user_by_referral_code(referral_code)
-                    if ref and ref['user_id'] != user_id:
+                    if ref and ref['user_id'] != uid:
                         referred_by = referral_code
-                    elif ref and ref['user_id'] == user_id:
-                        await update.message.reply_text(f"{EMOJIS['cross']} You cannot use your own referral code!")
-                        await self._update_perf(time.time() - start_time, False)
+                    elif ref:
+                        await update.message.reply_text(f"{EMOJIS['cross']} Cannot use own code.")
+                        await self._update_perf(time.time()-start_time, False)
                         return
                     else:
-                        await update.message.reply_text(f"{EMOJIS['cross']} Invalid referral code.")
-                        await self._update_perf(time.time() - start_time, False)
+                        await update.message.reply_text(f"{EMOJIS['cross']} Invalid code.")
+                        await self._update_perf(time.time()-start_time, False)
                         return
 
-                created = await self.db.create_user_with_retry(user_id, user.username or "NoUsername", first_name, referred_by)
+                created = await self.db.create_user_with_retry(uid, user.username or "NoUsername", first_name, referred_by)
                 if created:
-                    msg = WELCOME_MESSAGE_REFERRED if referred_by else WELCOME_MESSAGE
-                    await update.message.reply_text(f"Welcome {first_name}! {EMOJIS['party']}\n\n{msg}")
+                    welcome = WELCOME_MESSAGE_REFERRED if referred_by else WELCOME_MESSAGE
+                    await update.message.reply_text(f"Welcome {first_name}! {EMOJIS['party']}\n\n{welcome}")
                     await self.show_step(update, context, 1)
-                    await self._update_perf(time.time() - start_time, True)
+                    await self._update_perf(time.time()-start_time, True)
                 else:
-                    await update.message.reply_text(f"{EMOJIS['cross']} Technical issue. Try again later.")
-                    await self._update_perf(time.time() - start_time, False)
+                    await update.message.reply_text(f"{EMOJIS['cross']} Tech issue. Try later.")
+                    await self._update_perf(time.time()-start_time, False)
             else:
-                step = existing_user.get('current_step', 1)
+                step = existing.get('current_step',1)
                 await update.message.reply_text(f"Welcome back {first_name}! You're on step {step}.")
-                if step > TOTAL_STEPS:
-                    await self.show_completion_with_referral(update, existing_user)
+                if step> TOTAL_STEPS:
+                    await self.show_completion_with_referral(update, existing)
                 else:
                     await self.show_step(update, context, step)
-                await self._update_perf(time.time() - start_time, True)
+                await self._update_perf(time.time()-start_time, True)
 
-    async def show_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, step: int):
-        if step > TOTAL_STEPS:
-            user = await self.db.get_user_with_retry(update.effective_user.id)
-            return await self.show_completion_with_referral(update, user)
+    async def show_step(self, update, context, step:int):
+        if step> TOTAL_STEPS:
+            user=await self.db.get_user_with_retry(update.effective_user.id)
+            return await self.show_completion_with_referral(update,user)
 
-        text = STEPS[step] if step != 6 else STEPS[6].format("Minativerseofficial")
-        buttons = []
-        if step == 1:
-            buttons = [
-                [InlineKeyboardButton("📥 Download App", url=SOCIAL_LINKS['app_download'])],
-                [InlineKeyboardButton("✅ Downloaded", callback_data=CALLBACK_DATA['verify_step_1'])]
-            ]
-        elif step == 2:
-            buttons = [
-                [InlineKeyboardButton("🐦 Follow on Twitter", url=SOCIAL_LINKS['twitter'])],
-                [InlineKeyboardButton("ℹ️ Send Username", callback_data=CALLBACK_DATA['twitter_info'])]
-            ]
-        elif step == 3:
-            buttons = [
-                [InlineKeyboardButton("📸 Follow on Instagram", url=SOCIAL_LINKS['instagram'])],
-                [InlineKeyboardButton("ℹ️ Send Username", callback_data=CALLBACK_DATA['instagram_info'])]
-            ]
-        elif step == 4:
-            buttons = [
-                [InlineKeyboardButton("📊 Visit CMC", url=SOCIAL_LINKS['coinmarketcap'])],
-                [InlineKeyboardButton("ℹ️ Send UserID", callback_data=CALLBACK_DATA['coinmarketcap_info'])]
-            ]
-        elif step == 5:
-            buttons = [[InlineKeyboardButton("ℹ️ Send BEP20 Address", callback_data=CALLBACK_DATA['bep20_info'])]]
-        elif step == 6:
-            user = await self.db.get_user_with_retry(update.effective_user.id)
-            missing = []
-            su = user.get('social_usernames', {})
+        text = STEPS[step] if step!=6 else STEPS[6].format("Minativerseofficial")
+        kb=[]
+        if step==1:
+            kb=[[InlineKeyboardButton("📥 Download App", url=SOCIAL_LINKS['app_download'])],
+                [InlineKeyboardButton("✅ Downloaded", callback_data=CALLBACK_DATA['verify_step_1'])]]
+        elif step==2:
+            kb=[[InlineKeyboardButton("🐦 Follow Twitter",url=SOCIAL_LINKS['twitter'])],
+                [InlineKeyboardButton("ℹ️ Send Username",callback_data=CALLBACK_DATA['twitter_info'])]]
+        elif step==3:
+            kb=[[InlineKeyboardButton("📸 Follow Insta",url=SOCIAL_LINKS['instagram'])],
+                [InlineKeyboardButton("ℹ️ Send Username",callback_data=CALLBACK_DATA['instagram_info'])]]
+        elif step==4:
+            kb=[[InlineKeyboardButton("📊 Visit CMC",url=SOCIAL_LINKS['coinmarketcap'])],
+                [InlineKeyboardButton("ℹ️ Send UserID",callback_data=CALLBACK_DATA['coinmarketcap_info'])]]
+        elif step==5:
+            kb=[[InlineKeyboardButton("ℹ️ Send BEP20",callback_data=CALLBACK_DATA['bep20_info'])]]
+        elif step==6:
+            user=await self.db.get_user_with_retry(update.effective_user.id)
+            missing=[]
+            su=user.get('social_usernames',{})
             if not su.get('twitter'): missing.append("Twitter")
             if not su.get('instagram'): missing.append("Instagram")
             if not su.get('coinmarketcap'): missing.append("CMC")
             if not user.get('bep20_address'): missing.append("BEP20")
             if not missing:
-                buttons = [[InlineKeyboardButton("🎉 Complete", callback_data=CALLBACK_DATA['complete_process'])]]
+                kb=[[InlineKeyboardButton("🎉 Complete",callback_data=CALLBACK_DATA['complete_process'])]]
             else:
-                text += "\n\n⚠️ Missing: " + ", ".join(missing)
-        buttons.append([InlineKeyboardButton("❓ Help", callback_data=CALLBACK_DATA['help'])])
+                text+= "\n\n⚠️ Missing: "+", ".join(missing)
+        kb.append([InlineKeyboardButton("❓ Help",callback_data=CALLBACK_DATA['help'])])
         await update.message.reply_text(f"Step {step}/{TOTAL_STEPS}\n\n{text}",
-                                        reply_markup=InlineKeyboardMarkup(buttons),
+                                        reply_markup=InlineKeyboardMarkup(kb),
                                         parse_mode='Markdown')
 
-    async def show_completion_with_referral(self, update: Update, user: dict):
-        stats = user.get('referral_stats', {})
-        text = (
-            f"🎉 **Congratulations!** 🎉\n\n"
-            f"Your Referral Link:\n"
-            f"`https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user['referral_code']}`\n\n"
-            f"Referrals: {stats.get('total_referrals',0)}\n"
-            f"Rewards: {stats.get('total_referrals',0)*2} MNTC"
+    async def show_completion_with_referral(self, update, user:dict):
+        rs=user.get('referral_stats',{})
+        text=(
+            "🎉 **Congrats!** 🎉\n\n"
+            f"Referral Link:\n`https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user['referral_code']}`\n\n"
+            f"Referrals: {rs.get('total_referrals',0)}\n"
+            f"Rewards: {rs.get('total_referrals',0)*2} MNTC"
         )
-        kb = [[InlineKeyboardButton("📊 Status", callback_data=CALLBACK_DATA['show_status'])]]
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        kb=[[InlineKeyboardButton("📊 Status",callback_data=CALLBACK_DATA['show_status'])]]
+        await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup(kb),parse_mode='Markdown')
 
-    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
+    async def button_handler(self, update, context):
+        query=update.callback_query
         await query.answer()
-        user_id = query.from_user.id
-        data = query.data
+        uid=query.from_user.id
+        data=query.data
 
         async with self._operation_semaphore:
-            if not await self._check_global_rate_limit(user_id):
+            if not await self._check_global_rate_limit(uid):
                 return await query.edit_message_text("Too many requests.")
 
-            user = await self.db.get_user_with_retry(user_id)
+            user=await self.db.get_user_with_retry(uid)
             if not user:
                 return await query.edit_message_text(MESSAGE_TEMPLATES['user_not_found'])
+            step=user.get('current_step',1)
 
-            step = user.get('current_step', 1)
-
-            if data == CALLBACK_DATA['verify_step_1'] and step == 1:
-                await self.db.update_user_step(user_id,1,True)
+            if data==CALLBACK_DATA['verify_step_1'] and step==1:
+                await self.db.update_user_step(uid,1,True)
                 await query.edit_message_text("✅ Download confirmed.")
-                await self.show_step(update, context,2)
+                await self.show_step(update,context,2)
 
-            elif data == CALLBACK_DATA['complete_process'] and step >= 6:
-                await self.db.update_user_step(user_id,6,True)
-                await self.send_completion_message(query, await self.db.get_user_with_retry(user_id))
+            elif data==CALLBACK_DATA['complete_process'] and step>=6:
+                await self.db.update_user_step(uid,6,True)
+                await self.send_completion_message(query,await self.db.get_user_with_retry(uid))
 
-            elif data in (CALLBACK_DATA['twitter_info'],
-                          CALLBACK_DATA['instagram_info'],
-                          CALLBACK_DATA['coinmarketcap_info'],
-                          CALLBACK_DATA['bep20_info']):
-                instr = {
-                    CALLBACK_DATA['twitter_info']: HELP_TEMPLATES['instructions']['twitter'],
-                    CALLBACK_DATA['instagram_info']: HELP_TEMPLATES['instructions']['instagram'],
-                    CALLBACK_DATA['coinmarketcap_info']: HELP_TEMPLATES['instructions']['coinmarketcap'],
-                    CALLBACK_DATA['bep20_info']: HELP_TEMPLATES['instructions']['bep20']
+            elif data in (CALLBACK_DATA['twitter_info'],CALLBACK_DATA['instagram_info'],
+                         CALLBACK_DATA['coinmarketcap_info'],CALLBACK_DATA['bep20_info']):
+                mapping={
+                    CALLBACK_DATA['twitter_info']:HELP_TEMPLATES['instructions']['twitter'],
+                    CALLBACK_DATA['instagram_info']:HELP_TEMPLATES['instructions']['instagram'],
+                    CALLBACK_DATA['coinmarketcap_info']:HELP_TEMPLATES['instructions']['coinmarketcap'],
+                    CALLBACK_DATA['bep20_info']:HELP_TEMPLATES['instructions']['bep20'],
                 }
-                await query.edit_message_text(instr[data])
+                await query.edit_message_text(mapping[data])
 
-            elif data == CALLBACK_DATA['show_status']:
-                await self.show_status_callback(query, user)
-
-            elif data == CALLBACK_DATA['show_referral']:
-                await self.show_referral_stats_callback(query, user)
-
-            elif data == CALLBACK_DATA['help']:
-                kb = [
-                    [InlineKeyboardButton("📞 Support", url=SOCIAL_LINKS['support'])],
-                    [InlineKeyboardButton("🌐 Website", url=SOCIAL_LINKS['website'])]
-                ]
+            elif data==CALLBACK_DATA['show_status']:
+                await self.show_status_callback(query,user)
+            elif data==CALLBACK_DATA['show_referral']:
+                await self.show_referral_stats_callback(query,user)
+            elif data==CALLBACK_DATA['help']:
+                kb=[[InlineKeyboardButton("📞 Support",url=SOCIAL_LINKS['support'])],
+                    [InlineKeyboardButton("🌐 Website",url=SOCIAL_LINKS['website'])]]
                 await query.edit_message_text(HELP_TEMPLATES['help_button'],
                                               reply_markup=InlineKeyboardMarkup(kb),
                                               parse_mode='Markdown')
 
-    async def send_completion_message(self, query, user: dict):
-        su = user.get('social_usernames',{})
-        m = user.get('bep20_address','')
-        ri = user.get('reward_info',{})
-        earned = ri.get('mntc_earned',0) or (4 if user.get('is_referred') else 4)
-        text = (
+    async def send_completion_message(self, query, user:dict):
+        su=user.get('social_usernames',{})
+        m=user.get('bep20_address','')
+        ri=user.get('reward_info',{})
+        earned=ri.get('mntc_earned',0) or (4 if user.get('is_referred') else 4)
+        text=(
             "🎉 **CONGRATULATIONS!** 🎉\n\n"
             f"🐦 Twitter: @{su.get('twitter','N/A')}\n"
             f"📸 Instagram: @{su.get('instagram','N/A')}\n"
             f"📊 CMC: @{su.get('coinmarketcap','N/A')}\n"
             f"🏦 BEP20: {m[:10]}...{m[-6:] if m else 'N/A'}\n\n"
             f"💰 Reward: {earned} MNTC\n\n"
-            f"🎁 Referral:" 
-            f"`https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user['referral_code']}`\n\n"
-            "Share to earn +2 MNTC each!"
+            f"🎁 Referral:\n`https://t.me/{REFERRAL_CONFIG['bot_username']}?start={user['referral_code']}`\n"
+            " Share to earn +2 MNTC!"
         )
-        await query.edit_message_text(text, parse_mode='Markdown')
+        await query.edit_message_text(text,parse_mode='Markdown')
 
-    async def show_status_callback(self, query, user: dict):
-        sc = user.get('steps_completed',{})
-        su = user.get('social_usernames',{})
-        ba = user.get('bep20_address','N/A')
-        rs = user.get('referral_stats',{})
-        ri = user.get('reward_info',{})
-        isref = user.get('is_referred',False)
-        text = STATUS_TEMPLATE.format(
-            user.get('current_step',1), TOTAL_STEPS,
-            len(sc), TOTAL_STEPS,
+    async def show_status_callback(self, query, user:dict):
+        sc=user.get('steps_completed',{})
+        su=user.get('social_usernames',{})
+        ba=user.get('bep20_address','N/A')
+        rs=user.get('referral_stats',{})
+        ri=user.get('reward_info',{})
+        isref=user.get('is_referred',False)
+        text=STATUS_TEMPLATE.format(
+            user.get('current_step',1),TOTAL_STEPS,
+            len(sc),TOTAL_STEPS,
             STATUS_ICONS['completed'] if sc.get('step_1') else STATUS_ICONS['not_completed'],
             STATUS_ICONS['completed'] if sc.get('step_2') else STATUS_ICONS['not_completed'],
             STATUS_ICONS['completed'] if sc.get('step_3') else STATUS_ICONS['not_completed'],
@@ -330,92 +310,83 @@ class MinatiVaultBot:
             STATUS_ICONS.get(ri.get('reward_status','pending'),'⏳ Pending'),
             MESSAGE_TEMPLATES['all_completed'] if user.get('current_step')>TOTAL_STEPS else f"Continue with Step {user.get('current_step',1)}"
         )
-        await query.edit_message_text(text, parse_mode='Markdown')
+        await query.edit_message_text(text,parse_mode='Markdown')
 
-    async def show_referral_stats_callback(self, query, user: dict):
-        rs = user.get('referral_stats',{})
-        text = REFERRAL_STATS_TEMPLATE.format(
+    async def show_referral_stats_callback(self, query, user:dict):
+        rs=user.get('referral_stats',{})
+        text=REFERRAL_STATS_TEMPLATE.format(
             total_referrals=rs.get('total_referrals',0),
             total_rewards=rs.get('total_rewards',0),
             bot_username=REFERRAL_CONFIG['bot_username'],
-            referral_code=user.get('referral_code','X'),
+            referral_code=user.get('referral_code','REFXXXXX'),
             website=SOCIAL_LINKS['website']
         )
-        kb = [[InlineKeyboardButton("📊 Status", callback_data=CALLBACK_DATA['show_status'])]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        kb=[[InlineKeyboardButton("📊 Status",callback_data=CALLBACK_DATA['show_status'])]]
+        await query.edit_message_text(text,reply_markup=InlineKeyboardMarkup(kb),parse_mode='Markdown')
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        start_time = time.time()
-        uid = update.effective_user.id
-        msg = update.message.text.strip()
+    async def handle_message(self, update, context):
+        start_time=time.time()
+        uid=update.effective_user.id
+        msg=update.message.text.strip()
 
         async with self._operation_semaphore:
             if not await self._check_global_rate_limit(uid):
                 return await update.message.reply_text("Too many requests.")
-            user = await self.db.get_user_with_retry(uid)
+            user=await self.db.get_user_with_retry(uid)
             if not user:
-                return await update.message.reply_text("❌ Please /start first.")
+                return await update.message.reply_text("❌ Please use /start first.")
 
-            step = user.get('current_step',1)
+            step=user.get('current_step',1)
             if step==2:
-                un = msg.lstrip('@')
-                valid, err = self.validators.validate_username(un)
-                if valid:
-                    if await self.verify_social_follow('twitter',un):
-                        await self.db.save_social_username(uid,'twitter',un)
-                        await self.db.update_user_step(uid,2,True)
-                        await update.message.reply_text(f"✅ Twitter @{un} verified.")
-                        await self.show_step(update,context,3)
-                    else:
-                        await update.message.reply_text("⚠️ Not verified. Try again.")
+                un=msg.lstrip('@')
+                valid,err=self.validators.validate_username(un)
+                if valid and await self.verify_social_follow('twitter',un):
+                    await self.db.save_social_username(uid,'twitter',un)
+                    await self.db.update_user_step(uid,2,True)
+                    await update.message.reply_text(f"✅ Twitter @{un} verified.")
+                    await self.show_step(update,context,3)
                 else:
-                    await update.message.reply_text(f"❌ {err}")
+                    await update.message.reply_text(f"❌ {err if not valid else 'Verification failed.'}")
                 return
 
             if step==3:
-                un = msg.lstrip('@')
-                valid, err = self.validators.validate_username(un)
-                if valid:
-                    if await self.verify_social_follow('instagram',un):
-                        await self.db.save_social_username(uid,'instagram',un)
-                        await self.db.update_user_step(uid,3,True)
-                        await update.message.reply_text(f"✅ Instagram @{un} verified.")
-                        await self.show_step(update,context,4)
-                    else:
-                        await update.message.reply_text("⚠️ Not verified.")
+                un=msg.lstrip('@')
+                valid,err=self.validators.validate_username(un)
+                if valid and await self.verify_social_follow('instagram',un):
+                    await self.db.save_social_username(uid,'instagram',un)
+                    await self.db.update_user_step(uid,3,True)
+                    await update.message.reply_text(f"✅ Instagram @{un} verified.")
+                    await self.show_step(update,context,4)
                 else:
-                    await update.message.reply_text(f"❌ {err}")
+                    await update.message.reply_text(f"❌ {err if not valid else 'Verification failed.'}")
                 return
 
             if step==4:
-                cmc = msg
-                valid, err = self.validators.validate_coinmarketcap_userid(cmc)
-                if valid:
-                    if await self.verify_social_follow('coinmarketcap',cmc):
-                        await self.db.save_social_username(uid,'coinmarketcap',cmc)
-                        await self.db.update_user_step(uid,4,True)
-                        await update.message.reply_text(f"✅ CMC {cmc} verified.")
-                        await self.show_step(update,context,5)
-                    else:
-                        await update.message.reply_text("⚠️ Not verified.")
+                cmc=msg
+                valid,err=self.validators.validate_coinmarketcap_userid(cmc)
+                if valid and await self.verify_social_follow('coinmarketcap',cmc):
+                    await self.db.save_social_username(uid,'coinmarketcap',cmc)
+                    await self.db.update_user_step(uid,4,True)
+                    await update.message.reply_text(f"✅ CMC {cmc} verified.")
+                    await self.show_step(update,context,5)
                 else:
-                    await update.message.reply_text(f"❌ {err}")
+                    await update.message.reply_text(f"❌ {err if not valid else 'Verification failed.'}")
                 return
 
             if step==5:
-                valid, err = self.validators.validate_bep20_address(msg)
+                valid,err=self.validators.validate_bep20_address(msg)
                 if valid:
                     await self.db.save_bep20_address(uid,msg)
                     await self.db.update_user_step(uid,5,True)
-                    await update.message.reply_text(f"✅ Address {msg} saved.")
+                    await update.message.reply_text(f"✅ Address saved.")
                     await self.show_step(update,context,6)
                 else:
                     await update.message.reply_text(f"❌ {err}")
                 return
 
-            await update.message.reply_text("Use the buttons or /help for assistance.")
+            await update.message.reply_text("Use buttons or /help.")
 
-    async def referral_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def referral_command(self, update, context):
         uid=update.effective_user.id
         user=await self.db.get_user_with_retry(uid)
         if not user:
@@ -431,7 +402,7 @@ class MinatiVaultBot:
         kb=[[InlineKeyboardButton("📊 Status",callback_data=CALLBACK_DATA['show_status'])]]
         await update.message.reply_text(text,reply_markup=InlineKeyboardMarkup(kb),parse_mode='Markdown')
 
-    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def stats_command(self, update, context):
         stats=await self.db.get_user_stats()
         tu=stats.get('total_users',0)
         cu=stats.get('completed_users',0)
@@ -439,21 +410,23 @@ class MinatiVaultBot:
         text=STATS_TEMPLATE.format(tu,cu,rate,datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         await update.message.reply_text(text,parse_mode='Markdown')
 
-    async def performance_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def performance_command(self, update, context):
         uid=update.effective_user.id
         ADMINS=[123456789]
         if uid not in ADMINS:
             return await update.message.reply_text("❌ Unauthorized")
         pm=self._performance_metrics
+        success=pm['total_requests']-pm['failed_requests']
+        rate=(success/pm['total_requests']*100) if pm['total_requests']>0 else 0
         text=(
-            f"📊 Total reqs: {pm['total_requests']}\n"
+            f"📊 Total requests: {pm['total_requests']}\n"
             f"❌ Failed: {pm['failed_requests']}\n"
             f"⏱ Avg RT: {pm['avg_response_time']:.3f}s\n"
-            f"🚫 Rate limited: {pm['rate_limited_requests']}"
+            f"⌛ Rate limited: {pm['rate_limited_requests']}"
         )
         await update.message.reply_text(text)
 
-    async def health_check_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def health_check_command(self, update, context):
         uid=update.effective_user.id
         ADMINS=[123456789]
         if uid not in ADMINS:
@@ -464,11 +437,11 @@ class MinatiVaultBot:
         text=(
             f"{emoji} Status: {h['status']}\n"
             f"Circuit: {cb}\n"
-            f"Failures: {h['connection_failures']}\n"
+            f"Failures: {h['connection_failures']}"
         )
         await update.message.reply_text(text)
 
-    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+    async def error_handler(self, update, context):
         logger.error(f"Update {update} error {context.error}")
 
     def setup_handlers(self):
@@ -481,7 +454,7 @@ class MinatiVaultBot:
         app.add_handler(CommandHandler("health",self.health_check_command))
         app.add_handler(CommandHandler("performance",self.performance_command))
         app.add_handler(CallbackQueryHandler(self.button_handler))
-        app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND,self.handle_message))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         app.add_error_handler(self.error_handler)
 
     async def cleanup_telegram_bot(self):
@@ -498,13 +471,11 @@ class MinatiVaultBot:
 
     async def start_bot(self):
         await self.initialize_services_async()
-        # Reset circuit breaker
         if self.db._circuit_breaker_open:
             self.db._circuit_breaker_open=False
             self.db._connection_failures=0
             self.db._last_failure_time=None
             logger.info("Circuit breaker reset after init")
-        # Ensure stats
         await self.db._init_bot_stats_async()
         await self.cleanup_telegram_bot()
         self.application=(
@@ -515,8 +486,7 @@ class MinatiVaultBot:
         )
         self.setup_handlers()
         self.running=True
-        # init/start
-        for i in range(3):
+        for _ in range(3):
             try:
                 await self.application.initialize()
                 await self.application.start()
@@ -528,7 +498,6 @@ class MinatiVaultBot:
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True
         )
-        # background tasks
         asyncio.create_task(self.performance_monitor())
         while self.running:
             await asyncio.sleep(1)
@@ -539,7 +508,7 @@ class MinatiVaultBot:
             pm=self._performance_metrics
             success=pm['total_requests']-pm['failed_requests']
             rate=(success/pm['total_requests']*100) if pm['total_requests']>0 else 0
-            logger.info(f"Perf: reqs={pm['total_requests']} success_rate={rate:.1f}% avg_rt={pm['avg_response_time']:.3f}s rate_limited={pm['rate_limited_requests']}")
+            logger.info(f"Perf: reqs={pm['total_requests']} success={rate:.1f}% avg_rt={pm['avg_response_time']:.3f}s rate_limited={pm['rate_limited_requests']}")
 
     async def stop_bot(self):
         self.running=False
@@ -556,7 +525,7 @@ async def main():
         print("Missing BOT_TOKEN or FIREBASE_PROJECT_ID")
         sys.exit(1)
     bot=MinatiVaultBot()
-    def sig(sig,frm):
+    def sig(_,__):
         bot.running=False
     signal.signal(signal.SIGINT,sig)
     signal.signal(signal.SIGTERM,sig)
