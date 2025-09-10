@@ -1311,226 +1311,195 @@ Use the buttons below for instant access to our platforms
         # Error handler
         self.application.add_error_handler(self.error_handler)
 
-    async def cleanup_telegram_bot(self):
-        """Clean up Telegram bot connections and webhooks"""
+    # Fix for main.py - Updated cleanup_telegram_bot method
+
+async def cleanup_telegram_bot(self):
+    """Clean up Telegram bot connections and webhooks - FIXED VERSION"""
+    try:
+        logger.info("🧹 Cleaning up Telegram bot connections...")
+        
+        # Create temporary application for cleanup
+        temp_app = Application.builder().token(config.BOT_TOKEN).build()
+        
         try:
-            logger.info("🧹 Cleaning up Telegram bot connections...")
+            # Initialize the application
+            await temp_app.initialize()
             
-            # Create temporary application for cleanup
-            temp_app = Application.builder().token(config.BOT_TOKEN).build()
-            
+            # Delete webhook if exists (this can cause conflicts with polling)
             try:
-                # Initialize the application
-                await temp_app.initialize()
-                
-                # Delete webhook if exists (this can cause conflicts with polling)
-                try:
-                    await temp_app.bot.delete_webhook(drop_pending_updates=True)
-                    logger.info("✅ Webhook deleted successfully")
-                except Exception as e:
-                    logger.warning(f"⚠️ Webhook deletion failed (may not exist): {e}")
-                
-                # Get bot info to verify connection
+                await temp_app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Webhook deleted successfully")
+            except Exception as e:
+                logger.warning(f"⚠️ Webhook deletion failed (may not exist): {e}")
+            
+            # Get bot info to verify connection
+            try:
                 bot_info = await temp_app.bot.get_me()
                 logger.info(f"✅ Bot connection verified: @{bot_info.username}")
-                
-            except Conflict as e:
-                logger.error(f"❌ CONFLICT: {e}")
-                logger.error("💡 Another instance is using this bot token!")
-                raise
             except Exception as e:
-                logger.warning(f"⚠️ Bot cleanup warning: {e}")
-            finally:
-                # Always shutdown temp application
-                try:
-                    await temp_app.shutdown()
-                except:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"❌ Bot cleanup failed: {e}")
+                logger.warning(f"⚠️ Bot info check failed: {e}")
+                
+        except Conflict as e:
+            logger.error(f"❌ CONFLICT: {e}")
+            logger.error("💡 Another instance is using this bot token!")
             raise
-
-    async def start_bot(self):
-        """Start the bot with enhanced conflict resolution"""
-        try:
-            logger.info(f"{EMOJIS['rocket']} Starting Minati Vault Bot with Enhanced Optimizations...")
-
-            # Initialize services first
-            await self.initialize_services_async()
-
-            # Clean up any existing connections
-            await self.cleanup_telegram_bot()
-
-            # Create application
-            self.application = Application.builder().token(config.BOT_TOKEN).build()
-
-            # Setup handlers
-            self.setup_handlers()
-
-            logger.info(f"{EMOJIS['checkmark']} Bot handlers configured")
-            logger.info(f"{EMOJIS['fire']} Firebase connection: Ready")
-            logger.info(f"🆔 Firebase Project: {config.FIREBASE_PROJECT_ID}")
-            logger.info(f"{EMOJIS['stats']} Enhanced validation features: ACTIVE")
-            logger.info(f"{EMOJIS['gift']} Referral system: ACTIVE")
-            logger.info(f"🚀 Performance optimizations: ACTIVE")
-            logger.info(f"⚡ Connection pooling: ENABLED")
-            logger.info(f"💾 Caching system: ENABLED")
-            logger.info(f"🛡️ Rate limiting: ENABLED")
-            logger.info(f"👷 Task queue workers: {getattr(config, 'TASK_QUEUE_WORKERS', 3)}")
-            logger.info(f"🔗 Database pool size: {getattr(config, 'DB_POOL_SIZE', 5)}")
-            if getattr(config, 'IS_RENDER', False):
-                logger.info(f"🌐 Render environment detected (Memory limit: {getattr(config, 'MEMORY_LIMIT_MB', 450)}MB)")
-            if getattr(config, 'IS_PRODUCTION', False):
-                logger.info(f"🚀 Production mode enabled")
-            logger.info(f"{EMOJIS['target']} Starting polling...")
-
-            self.running = True
-
-            # Initialize the application with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    await self.application.initialize()
-                    await self.application.start()
-                    break
-                except Conflict as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Conflict on attempt {attempt + 1}, retrying in 5 seconds...")
-                        await asyncio.sleep(5)
-                        await self.cleanup_telegram_bot()
-                    else:
-                        raise
-
-            # Start polling with enhanced error handling
+        except Exception as e:
+            logger.warning(f"⚠️ Bot cleanup warning: {e}")
+        finally:
+            # Always shutdown temp application - FIXED VERSION
             try:
-                await self.application.updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True,  # Drop pending updates to avoid conflicts
-                    read_timeout=30,  # Increase read timeout for better stability
-                    write_timeout=30,  # Increase write timeout
-                    connect_timeout=30,  # Increase connection timeout
-                    pool_timeout=10  # Connection pool timeout
-                )
-                logger.info(f"{EMOJIS['checkmark']} Bot started successfully!")
-                logger.info(f"📈 Expected performance: 200-500 concurrent users")
-                logger.info(f"⚡ Response time: 0.5-2 seconds")
-                logger.info(f"💾 Memory optimization: 30-40% reduction")
+                await temp_app.shutdown()
+                logger.info("✅ Temporary application shutdown complete")
+            except Exception as shutdown_e:
+                logger.warning(f"⚠️ Temp app shutdown warning: {shutdown_e}")
+                    
+    except Exception as e:
+        logger.error(f"❌ Bot cleanup failed: {e}")
+        # Don't raise here - continue with startup
+        logger.info("🔄 Continuing with bot startup despite cleanup issues...")
 
-                # Performance monitoring loop
-                if getattr(config, 'ENABLE_PERFORMANCE_MONITORING', True):
-                    asyncio.create_task(self.performance_monitoring_loop())
+async def start_bot(self):
+    """Start the bot with enhanced conflict resolution - FIXED VERSION"""
+    try:
+        logger.info(f"{EMOJIS['rocket']} Starting Minati Vault Bot with Enhanced Optimizations...")
 
-                # Keep the bot running
-                while self.running:
-                    await asyncio.sleep(1)
+        # Initialize services first
+        await self.initialize_services_async()
 
-            except Conflict as e:
-                logger.error(f"❌ POLLING CONFLICT: {e}")
-                logger.error("💡 SOLUTION: Another instance is running or webhook is set!")
-                logger.error("🔧 Try: 1) Stop other instances 2) Delete webhook manually")
-                raise
+        # Clean up any existing connections - Don't fail if cleanup fails
+        try:
+            await self.cleanup_telegram_bot()
+        except Exception as cleanup_e:
+            logger.warning(f"⚠️ Cleanup failed, continuing anyway: {cleanup_e}")
+
+        # Create application
+        self.application = Application.builder().token(config.BOT_TOKEN).build()
+
+        # Setup handlers
+        self.setup_handlers()
+
+        logger.info(f"{EMOJIS['checkmark']} Bot handlers configured")
+        logger.info(f"{EMOJIS['fire']} Firebase connection: Ready")
+        logger.info(f"🆔 Firebase Project: {config.FIREBASE_PROJECT_ID}")
+        logger.info(f"{EMOJIS['stats']} Enhanced validation features: ACTIVE")
+        logger.info(f"{EMOJIS['gift']} Referral system: ACTIVE")
+        logger.info(f"🚀 Performance optimizations: ACTIVE")
+        logger.info(f"⚡ Connection pooling: ENABLED")
+        logger.info(f"💾 Caching system: ENABLED")
+        logger.info(f"🛡️ Rate limiting: ENABLED")
+        logger.info(f"👷 Task queue workers: {getattr(config, 'TASK_QUEUE_WORKERS', 3)}")
+        logger.info(f"🔗 Database pool size: {getattr(config, 'DB_POOL_SIZE', 5)}")
+        if getattr(config, 'IS_RENDER', False):
+            logger.info(f"🌐 Render environment detected (Memory limit: {getattr(config, 'MEMORY_LIMIT_MB', 450)}MB)")
+        if getattr(config, 'IS_PRODUCTION', False):
+            logger.info(f"🚀 Production mode enabled")
+        logger.info(f"{EMOJIS['target']} Starting polling...")
+
+        self.running = True
+
+        # Initialize and start the application - SIMPLIFIED VERSION
+        await self.application.initialize()
+        await self.application.start()
+
+        # Start polling with enhanced error handling
+        try:
+            await self.application.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,  # Drop pending updates to avoid conflicts
+                read_timeout=30,  # Increase read timeout for better stability
+                write_timeout=30,  # Increase write timeout
+                connect_timeout=30,  # Increase connection timeout
+                pool_timeout=10  # Connection pool timeout
+            )
+            logger.info(f"{EMOJIS['checkmark']} Bot started successfully!")
+            logger.info(f"📈 Expected performance: 200-500 concurrent users")
+            logger.info(f"⚡ Response time: 0.5-2 seconds")
+            logger.info(f"💾 Memory optimization: 30-40% reduction")
+
+            # Performance monitoring loop
+            if getattr(config, 'ENABLE_PERFORMANCE_MONITORING', True):
+                asyncio.create_task(self.performance_monitoring_loop())
+
+            # Keep the bot running
+            while self.running:
+                await asyncio.sleep(1)
 
         except Conflict as e:
-            logger.error(f"❌ TELEGRAM CONFLICT ERROR: {e}")
-            logger.error("=" * 60)
-            logger.error("🚨 CONFLICT RESOLUTION STEPS:")
-            logger.error("1. Check if another instance of this bot is running")
-            logger.error("2. Check if webhook is set (conflicts with polling)")
-            logger.error("3. Wait 1-2 minutes and try again")
-            logger.error("4. Use BotFather to revoke and regenerate token if needed")
-            logger.error("=" * 60)
-            sys.exit(1)
-
-        except Exception as e:
-            logger.error(f"❌ Error starting bot: {e}")
+            logger.error(f"❌ POLLING CONFLICT: {e}")
+            logger.error("💡 SOLUTION: Another instance is running or webhook is set!")
+            logger.error("🔧 Try: 1) Stop other instances 2) Delete webhook manually")
             raise
 
-        finally:
-            if self.application:
-                await self.stop_bot()
+    except Conflict as e:
+        logger.error(f"❌ TELEGRAM CONFLICT ERROR: {e}")
+        logger.error("=" * 60)
+        logger.error("🚨 CONFLICT RESOLUTION STEPS:")
+        logger.error("1. Check if another instance of this bot is running")
+        logger.error("2. Check if webhook is set (conflicts with polling)")
+        logger.error("3. Wait 1-2 minutes and try again")
+        logger.error("4. Use BotFather to revoke and regenerate token if needed")
+        logger.error("=" * 60)
+        sys.exit(1)
 
-    async def performance_monitoring_loop(self):
-        """Background task to monitor performance"""
-        while self.running:
+    except Exception as e:
+        logger.error(f"❌ Error starting bot: {e}")
+        raise
+
+    finally:
+        if self.application:
+            await self.stop_bot()
+
+async def stop_bot(self):
+    """Stop the bot gracefully with enhanced cleanup - FIXED VERSION"""
+    try:
+        logger.info(f"{EMOJIS['stop']} Stopping bot gracefully...")
+        self.running = False
+
+        # Stop task queue
+        if hasattr(self, 'task_queue'):
+            await self.task_queue.stop()
+            logger.info("✅ Task queue stopped")
+
+        if self.application:
             try:
-                await asyncio.sleep(getattr(config, 'LOG_PERFORMANCE_INTERVAL', 300))
-                
-                if hasattr(self.db, 'monitor'):
-                    stats = self.db.monitor.get_stats()
-                    
-                    # Log performance metrics periodically
-                    logger.info(
-                        f"📊 Performance: Memory={stats['memory_mb']:.1f}MB, "
-                        f"CPU={stats['cpu_percent']:.1f}%, "
-                        f"Req/s={stats['requests_per_second']:.2f}, "
-                        f"Cache Hit={stats['cache_hit_rate']:.1f}%, "
-                        f"DB Ops={stats['db_operations']}"
-                    )
-                    
-                    # Alert if memory usage is high
-                    memory_limit = getattr(config, 'MEMORY_LIMIT_MB', 450)
-                    if stats['memory_mb'] > memory_limit * 0.8:
-                        logger.warning(f"⚠️ High memory usage: {stats['memory_mb']:.1f}MB")
-                        # Force garbage collection
-                        gc.collect()
-                    
-                    # Alert if cache hit rate is low
-                    if stats['cache_hit_rate'] < 50 and stats['requests_total'] > 100:
-                        logger.warning(f"⚠️ Low cache hit rate: {stats['cache_hit_rate']:.1f}%")
-                    
-            except Exception as e:
-                logger.error(f"Performance monitoring error: {e}")
-
-    async def stop_bot(self):
-        """Stop the bot gracefully with enhanced cleanup"""
-        try:
-            logger.info(f"{EMOJIS['stop']} Stopping bot gracefully...")
-            self.running = False
-
-            # Stop task queue
-            if hasattr(self, 'task_queue'):
-                await self.task_queue.stop()
-                logger.info("✅ Task queue stopped")
-
-            if self.application:
-                try:
-                    if self.application.updater and self.application.updater.running:
+                # Check if updater exists and is running
+                if hasattr(self.application, 'updater') and self.application.updater:
+                    if hasattr(self.application.updater, 'running') and self.application.updater.running:
                         await self.application.updater.stop()
                         logger.info("✅ Updater stopped")
-                except Exception as e:
-                    logger.warning(f"⚠️ Updater stop warning: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Updater stop warning: {e}")
 
-                try:
-                    await self.application.stop()
-                    logger.info("✅ Application stopped")
-                except Exception as e:
-                    logger.warning(f"⚠️ Application stop warning: {e}")
+            try:
+                await self.application.stop()
+                logger.info("✅ Application stopped")
+            except Exception as e:
+                logger.warning(f"⚠️ Application stop warning: {e}")
 
-                try:
-                    await self.application.shutdown()
-                    logger.info("✅ Application shutdown")
-                except Exception as e:
-                    logger.warning(f"⚠️ Application shutdown warning: {e}")
+            try:
+                await self.application.shutdown()
+                logger.info("✅ Application shutdown")
+            except Exception as e:
+                logger.warning(f"⚠️ Application shutdown warning: {e}")
 
-            # Close database connection
-            if self.db:
-                try:
-                    self.db.close_connection()
-                    logger.info("✅ Database connection closed")
-                except Exception as e:
-                    logger.warning(f"⚠️ Database close warning: {e}")
+        # Close database connection
+        if self.db:
+            try:
+                self.db.close_connection()
+                logger.info("✅ Database connection closed")
+            except Exception as e:
+                logger.warning(f"⚠️ Database close warning: {e}")
 
-            # Force garbage collection
-            if getattr(config, 'ENABLE_GC_OPTIMIZATION', True):
-                gc.collect()
-                logger.info("✅ Memory cleanup completed")
+        # Force garbage collection
+        if getattr(config, 'ENABLE_GC_OPTIMIZATION', True):
+            gc.collect()
+            logger.info("✅ Memory cleanup completed")
 
-            logger.info(f"{EMOJIS['checkmark']} Bot stopped gracefully")
+        logger.info(f"{EMOJIS['checkmark']} Bot stopped gracefully")
 
-        except Exception as e:
-            logger.error(f"❌ Error stopping bot: {e}")
-
+    except Exception as e:
+        logger.error(f"❌ Error stopping bot: {e}")
+    
     def signal_handler(self, sig, frame):
         """Handle shutdown signals"""
         logger.info(f"📡 Received signal {sig}, shutting down...")
@@ -1601,5 +1570,6 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
