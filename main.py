@@ -1132,7 +1132,7 @@ Use the buttons below for instant access to our platforms
         user_id = update.effective_user.id
         
         # Only allow admin users (add your admin user IDs)
-        ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
+        ADMIN_USER_IDS = [7310158785]  # Replace with actual admin user IDs
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
             return
@@ -1528,3 +1528,4 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
