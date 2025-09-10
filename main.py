@@ -1172,7 +1172,7 @@ Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         user_id = update.effective_user.id
         
         # Admin check - replace with your admin user IDs
-        ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
+        ADMIN_USER_IDS = [7310158785]  # Replace with actual admin user IDs
         
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
@@ -1422,3 +1422,4 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
