@@ -1,10 +1,10 @@
-# Core Telegram Bot Dependencies
-python-telegram-bot==20.8
+# Core Telegram Bot Dependencies - UPDATED VERSIONS
+python-telegram-bot==20.7  # Downgrade from 20.8
 python-dotenv==1.0.1
 
-# Firebase and Database
-firebase-admin==6.5.0
-google-cloud-firestore==2.16.0
+# Firebase and Database  
+firebase-admin==6.4.0  # Downgrade for stability
+google-cloud-firestore==2.14.0  # Downgrade for stability
 
 # Performance and Monitoring
 psutil==5.9.8
@@ -12,10 +12,7 @@ psutil==5.9.8
 # Validation and Security
 validators==0.22.0
 
-# Async Support (if not included in Python)
-asyncio-mqtt==0.16.1
-
-# Optional: For better JSON handling
+# For better JSON handling
 orjson==3.9.15
 
 # For Render deployment
