@@ -39,13 +39,10 @@ aioredis>=2.0.1
 asyncio-throttle>=1.0.2
 typing-extensions>=4.8.0
 
-# Memory Management and Weak References (NEW)
-weakref>=1.0.0 if python_version < "3.3" else None
-
 # Performance Monitoring (NEW)
 psutil>=5.9.6
 
-# Memory Profiling (NEW - Optional for debugging)
+# Memory Profiling (Optional for debugging)
 memory-profiler>=0.61.0
 pympler>=0.9
 
@@ -66,7 +63,7 @@ gunicorn>=21.2.0
 uvicorn>=0.24.0
 
 # Optional: For better development experience
-ipython>=8.17.2 if python_version >= "3.9" else ipython>=7.34.0
+ipython>=8.17.2
 
 # Environment-specific requirements
 # Add these based on your deployment environment:
