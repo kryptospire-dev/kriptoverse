@@ -254,7 +254,7 @@ class MinatiVaultBot:
             except Exception as e:
                 logger.error(f"Error handling existing user {user_id}: {e}")
                 await update.message.reply_text(
-                    f"{EMOJIS['warning']} Welcome back! Use /status to check your progress."
+                    f"{EMOJIS['warning']} Welcome back! Use /start to check your progress."
                 )
 
     async def show_completion_with_referral(self, update: Update, user_data: dict):
@@ -939,7 +939,7 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Available Commands:*
 • /start - Start or restart the bot
-• /status - Check your current progress
+# • /status - Check your current progress
 • /help - Show this help message
 • /stats - Bot statistics
 
@@ -997,7 +997,7 @@ Use the buttons below for instant access to our platforms
         user_id = update.effective_user.id
         
         # Only allow admin users (add your admin user IDs)
-        ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
+        ADMIN_USER_IDS = [7310158785]  # Replace with actual admin user IDs
         
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
@@ -1048,7 +1048,7 @@ Use the buttons below for instant access to our platforms
         # Command handlers
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("help", self.help_command))
-        self.application.add_handler(CommandHandler("status", self.status_command))
+        # self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("referral", self.referral_command))
         self.application.add_handler(CommandHandler("health", self.health_check_command))
@@ -1284,3 +1284,4 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
