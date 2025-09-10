@@ -652,10 +652,6 @@ You have successfully completed all steps!
 **💰 Your Reward:** {mntc_earned} MNTC
 
 **What's Next?**
-
-
-
-**What's Next?**
 Our team will review your submission and contact you soon!
 
 ✅ To be eligible for rewards, please make sure you have joined our official community: @Minatirewards
@@ -1605,4 +1601,5 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
