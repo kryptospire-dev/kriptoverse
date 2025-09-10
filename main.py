@@ -938,8 +938,7 @@ Thank you for using Minati Vault Bot! 🚀
 🆘 *Minati Vault Bot Help*
 
 *Available Commands:*
-• /start - Start or restart the bot
-# • /status - Check your current progress
+• /start - Start or check the referral status
 • /help - Show this help message
 • /stats - Bot statistics
 
@@ -1284,5 +1283,6 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
 
