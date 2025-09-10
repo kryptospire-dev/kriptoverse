@@ -312,7 +312,7 @@ Share your referral link to earn more rewards! 💰
 
         step_message = STEPS.get(step, "Invalid step")
         if step == 6:
-            step_message = step_message.format("Minativerseofficial")
+            step_message = step_message.format("Minatirewards")
 
         keyboard = []
         if step == 1:
@@ -953,7 +953,7 @@ Thank you for using Minati Vault Bot! 🚀
 
 *Need Personal Assistance?*
 👨‍💼 Support: @Minatirewards
-📱 Follow: @Minativerseofficial
+📱 Follow: @Minatirewards
 
 *Important Notes:*
 • Social media usernames/IDs are collected for manual verification
@@ -1284,4 +1284,5 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
