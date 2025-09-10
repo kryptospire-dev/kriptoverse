@@ -869,7 +869,7 @@ Thank you for using Minati Vault Bot! 🚀
             reply_markup=reply_markup
         )
 
-    # async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Status command with verification info and referral stats"""
         user_id = update.effective_user.id
         user_data = self.db.get_user_with_retry(user_id)
@@ -938,7 +938,8 @@ Thank you for using Minati Vault Bot! 🚀
 🆘 *Minati Vault Bot Help*
 
 *Available Commands:*
-• /start - Start or Check the referral
+• /start - Start or restart the bot
+• /status - Check your current progress
 • /help - Show this help message
 • /stats - Bot statistics
 
@@ -996,7 +997,7 @@ Use the buttons below for instant access to our platforms
         user_id = update.effective_user.id
         
         # Only allow admin users (add your admin user IDs)
-        ADMIN_USER_IDS = [7310158785]  # Replace with actual admin user IDs
+        ADMIN_USER_IDS = [123456789]  # Replace with actual admin user IDs
         
         if user_id not in ADMIN_USER_IDS:
             await update.message.reply_text("❌ Unauthorized")
