@@ -1,633 +1,349 @@
-# Optimized Database Class - database.py
-import firebase_admin
-from firebase_admin import credentials, firestore
-from datetime import datetime
-from typing import Optional, Dict, Any, List
-import config
-import os
-import json
+# Optimized Validators Class - validators.py
+import re
 import logging
-import time
-import random
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Tuple, List
 from constants import (
-    FIREBASE_ENV_MAPPING,
-    FIREBASE_DEFAULTS,
-    FIREBASE_REQUIRED_VARS,
-    DB_COLLECTIONS,
-    DEFAULT_USER_DATA,
-    DEFAULT_BOT_STATS,
+    INVALID_BEP20_ADDRESSES,
+    INVALID_USERNAMES,
+    VALIDATION_LIMITS,
+    VALID_IMAGE_EXTENSIONS,
+    VALID_MIME_TYPES,
+    REGEX_PATTERNS,
+    USERNAME_INVALID_PATTERNS,
+    TWITTER_INVALID_PATTERNS,
+    INSTAGRAM_INVALID_PATTERNS,
+    COINMARKETCAP_INVALID_PATTERNS,
+    DANGEROUS_FILE_CHARS,
+    DANGEROUS_SQL_WORDS,
+    USER_ID_LIMITS,
     RATE_LIMITS,
-    generate_referral_code,
-    REFERRAL_CONFIG
+    VALIDATION_SUMMARY,
+    MIN_STEP,
+    MAX_STEP
 )
 
 logger = logging.getLogger(__name__)
 
-class OptimizedDatabase:
-    def __init__(self):
-        """Initialize Firebase connection with optimization"""
-        try:
-            firebase_admin.get_app()
-            logger.info("Firebase app already initialized")
-        except ValueError:
-            cred = self._get_credentials()
-            if cred is None:
-                raise Exception("Failed to get Firebase credentials")
-            firebase_admin.initialize_app(cred, {
-                'projectId': config.FIREBASE_PROJECT_ID
-            })
-            logger.info(f"Firebase initialized for project: {config.FIREBASE_PROJECT_ID}")
+# Pre-compile regex patterns for performance optimization
+COMPILED_PATTERNS = {
+    'bep20_address': re.compile(r'^[a-fA-F0-9]{40}$'),
+    'username': re.compile(r'^[a-zA-Z0-9._]+$'),
+    'coinmarketcap_userid': re.compile(r'^[a-zA-Z0-9._-]+$'),
+    'hexadecimal': re.compile(r'^[a-fA-F0-9]+$'),
+    'url': re.compile(r'https?://[^\s]+'),
+    'mention': re.compile(r'@\w+'),
+    'hashtag': re.compile(r'#\w+'),
+    'html_tags': re.compile(r'<[^>]*>'),
+    'referral_code': re.compile(r'^REF[A-Z0-9]{8}$'),
+    'spam_patterns': [
+        re.compile(r'^\d+[a-z]+\d+$'),
+        re.compile(r'^[a-z]+\d{4,}$'),
+        re.compile(r'^\w+_bot$'),
+        re.compile(r'^\w+official$')
+    ]
+}
 
-        self.db = firestore.client()
-        self.users_collection = self.db.collection(DB_COLLECTIONS['users'])
-        self.stats_collection = self.db.collection(DB_COLLECTIONS['bot_stats'])
+class OptimizedValidators:
+    """Optimized validation class with pre-compiled regex patterns"""
 
-        # Optimizations
-        self._executor = ThreadPoolExecutor(max_workers=10)  # Connection pooling simulation
-        self._connection_failures = 0
-        self._last_failure_time = None
-        self._circuit_breaker_open = False
-        self._circuit_breaker_threshold = 15  # Increased from 5
-        self._circuit_breaker_timeout = 60    # Increased from 30
+    @staticmethod
+    def validate_bep20_address(address: str) -> Tuple[bool, str]:
+        """Optimized BEP20 address validation"""
+        if not address:
+            return False, "Address cannot be empty"
+
+        address = address.strip()
+        if not address:
+            return False, "Address cannot be empty after removing whitespace"
+
+        if not address.startswith('0x'):
+            return False, "BEP20 address must start with '0x'"
+
+        if len(address) != VALIDATION_LIMITS['bep20_address_length']:
+            return False, f"BEP20 address must be exactly {VALIDATION_LIMITS['bep20_address_length']} characters long"
+
+        hex_part = address[2:]
+        if not COMPILED_PATTERNS['bep20_address'].match(hex_part):
+            return False, "BEP20 address can only contain hexadecimal characters"
+
+        # Quick invalid address check
+        address_lower = address.lower()
+        if address_lower in [addr.lower() for addr in INVALID_BEP20_ADDRESSES]:
+            return False, "Cannot use zero address, dead address, or other invalid addresses"
+
+        # Quick pattern checks
+        hex_lower = hex_part.lower()
+        if hex_lower == '0' * 40 or len(set(hex_lower)) == 1:
+            return False, "Invalid address pattern"
+
+        return True, "Valid BEP20 address"
+
+    @staticmethod
+    def validate_username(username: str) -> Tuple[bool, str]:
+        """Optimized username validation"""
+        if not username:
+            return False, "Username cannot be empty"
+
+        username = username.lstrip('@').strip()
+        if not username:
+            return False, "Username cannot be empty after removing @ and spaces"
+
+        # Length checks
+        username_len = len(username)
+        if username_len < VALIDATION_LIMITS['username_min_length']:
+            return False, f"Username must be at least {VALIDATION_LIMITS['username_min_length']} characters long"
+        if username_len > VALIDATION_LIMITS['username_max_length']:
+            return False, f"Username cannot be longer than {VALIDATION_LIMITS['username_max_length']} characters"
+
+        # Quick reserved username check
+        if username.lower() in INVALID_USERNAMES:
+            return False, f"Username '{username}' is reserved and cannot be used"
+
+        # Optimized regex check
+        if not COMPILED_PATTERNS['username'].match(username):
+            return False, "Username can only contain letters, numbers, underscores (_), and dots (.)"
+
+        # Quick boundary checks
+        if not username[0].isalnum() or not username[-1].isalnum():
+            return False, "Username must start and end with a letter or number"
+
+        # Quick pattern checks
+        if username.isdigit():
+            return False, "Username cannot be all numbers"
+
+        # Check for invalid patterns (optimized)
+        for pattern in USERNAME_INVALID_PATTERNS:
+            if pattern in username:
+                return False, f"Username cannot contain '{pattern}'"
+
+        # Platform-specific quick checks
+        username_lower = username.lower()
+        for pattern in TWITTER_INVALID_PATTERNS + INSTAGRAM_INVALID_PATTERNS:
+            if pattern in username_lower:
+                return False, f"Username cannot contain '{pattern}'"
+
+        # Quick spam pattern check
+        for compiled_pattern in COMPILED_PATTERNS['spam_patterns']:
+            if compiled_pattern.match(username_lower):
+                return False, "Username appears to follow a suspicious pattern"
+
+        return True, "Valid username"
+
+    @staticmethod
+    def validate_coinmarketcap_userid(userid: str) -> Tuple[bool, str]:
+        """Optimized CoinMarketCap User ID validation"""
+        if not userid:
+            return False, "CoinMarketCap User ID cannot be empty"
+
+        userid = userid.strip()
+        if not userid:
+            return False, "CoinMarketCap User ID cannot be empty after removing spaces"
+
+        # Length checks
+        userid_len = len(userid)
+        if userid_len < VALIDATION_LIMITS['coinmarketcap_userid_min_length']:
+            return False, f"CoinMarketCap User ID must be at least {VALIDATION_LIMITS['coinmarketcap_userid_min_length']} characters long"
+        if userid_len > VALIDATION_LIMITS['coinmarketcap_userid_max_length']:
+            return False, f"CoinMarketCap User ID cannot be longer than {VALIDATION_LIMITS['coinmarketcap_userid_max_length']} characters"
+
+        # Quick reserved check
+        if userid.lower() in INVALID_USERNAMES:
+            return False, f"User ID '{userid}' is reserved and cannot be used"
+
+        # Optimized regex check
+        if not COMPILED_PATTERNS['coinmarketcap_userid'].match(userid):
+            return False, "CoinMarketCap User ID can only contain letters, numbers, underscores (_), dots (.), and hyphens (-)"
+
+        # Quick boundary checks
+        if not userid[0].isalnum() or not userid[-1].isalnum():
+            return False, "CoinMarketCap User ID must start and end with a letter or number"
+
+        # Quick validation checks
+        if userid.isdigit():
+            return False, "CoinMarketCap User ID cannot be all numbers"
+
+        # Pattern checks (optimized)
+        for pattern in USERNAME_INVALID_PATTERNS:
+            if pattern in userid:
+                return False, f"CoinMarketCap User ID cannot contain '{pattern}'"
+
+        userid_lower = userid.lower()
+        for pattern in COINMARKETCAP_INVALID_PATTERNS:
+            if pattern in userid_lower:
+                return False, f"CoinMarketCap User ID cannot contain '{pattern}'"
+
+        return True, "Valid CoinMarketCap User ID"
+
+    @staticmethod
+    def validate_referral_code(referral_code: str) -> Tuple[bool, str]:
+        """Optimized referral code validation"""
+        if not referral_code:
+            return False, "Referral code cannot be empty"
+
+        referral_code = referral_code.strip()
+        if not referral_code:
+            return False, "Referral code cannot be empty after removing spaces"
+
+        # Length checks
+        code_len = len(referral_code)
+        if code_len < VALIDATION_LIMITS['referral_code_min_length']:
+            return False, f"Referral code must be at least {VALIDATION_LIMITS['referral_code_min_length']} characters long"
+        if code_len > VALIDATION_LIMITS['referral_code_max_length']:
+            return False, f"Referral code cannot be longer than {VALIDATION_LIMITS['referral_code_max_length']} characters"
+
+        # Optimized format validation
+        if not COMPILED_PATTERNS['referral_code'].match(referral_code):
+            return False, "Referral code must start with 'REF' followed by alphanumeric characters"
+
+        return True, "Valid referral code"
+
+    @staticmethod
+    def validate_screenshot(file_size: int, file_name: str, mime_type: Optional[str] = None) -> Tuple[bool, str]:
+        """Optimized screenshot validation"""
+        # File size limits
+        if file_size > VALIDATION_LIMITS['file_max_size']:
+            return False, f"File too large. Maximum size allowed: {VALIDATION_LIMITS['file_max_size'] // (1024*1024)}MB"
+        if file_size < VALIDATION_LIMITS['file_min_size']:
+            return False, "File too small. Minimum size: 1KB"
+
+        if not file_name:
+            return False, "File name cannot be empty"
+
+        # Clean file name
+        file_name = file_name.split('/')[-1].split('\\')[-1]
+
+        # Quick extension check
+        file_extension = None
+        file_name_lower = file_name.lower()
+        for ext in VALID_IMAGE_EXTENSIONS:
+            if file_name_lower.endswith(ext):
+                file_extension = ext
+                break
+
+        if not file_extension:
+            return False, f"Invalid file type. Allowed types: {', '.join(VALID_IMAGE_EXTENSIONS)}"
+
+        # MIME type validation
+        if mime_type and mime_type not in VALID_MIME_TYPES:
+            return False, f"Invalid MIME type: {mime_type}"
+
+        # Security checks (optimized)
+        for pattern in DANGEROUS_FILE_CHARS:
+            if pattern in file_name:
+                return False, f"File name contains invalid character: {pattern}"
+
+        if len(file_name) > VALIDATION_LIMITS['filename_max_length']:
+            return False, f"File name too long (max {VALIDATION_LIMITS['filename_max_length']} characters)"
+
+        return True, "Valid screenshot"
+
+    @staticmethod
+    def validate_message_text(text: str, max_length: int = None) -> Tuple[bool, str]:
+        """Optimized message text validation"""
+        if max_length is None:
+            max_length = VALIDATION_LIMITS['message_max_length']
+
+        if not text:
+            return False, "Message cannot be empty"
+
+        # Quick length check
+        if len(text) > max_length:
+            return False, f"Message too long. Maximum {max_length} characters allowed"
+
+        # Optimized spam detection
+        cleaned_text = ' '.join(text.split())
+        words = len(cleaned_text.split())
         
-        # In-memory cache (without Redis)
-        self._user_cache = {}
-        self._cache_ttl = {}
-        self._cache_max_size = 1000
-        self._cache_duration = 300  # 5 minutes
+        if words == 0:
+            return False, "Message cannot be empty"
 
-        self._init_bot_stats()
+        # Quick spam pattern count
+        spam_count = 0
+        spam_count += len(COMPILED_PATTERNS['url'].findall(text))
+        spam_count += len(COMPILED_PATTERNS['mention'].findall(text))
+        spam_count += len(COMPILED_PATTERNS['hashtag'].findall(text))
 
-    def _get_credentials(self):
-        """Get Firebase credentials with comprehensive error handling"""
-        logger.info("Attempting to get Firebase credentials...")
+        if spam_count / words > RATE_LIMITS['spam_threshold']:
+            return False, "Message appears to contain too much promotional content"
 
-        # PRIORITY 1: Service account file
-        if hasattr(config, 'FIREBASE_SERVICE_ACCOUNT_PATH') and config.FIREBASE_SERVICE_ACCOUNT_PATH:
-            if os.path.exists(config.FIREBASE_SERVICE_ACCOUNT_PATH):
-                try:
-                    logger.info(f"Using service account file: {config.FIREBASE_SERVICE_ACCOUNT_PATH}")
-                    with open(config.FIREBASE_SERVICE_ACCOUNT_PATH, 'r') as f:
-                        service_account_info = json.load(f)
-                    if self._validate_service_account(service_account_info):
-                        return credentials.Certificate(service_account_info)
-                except Exception as e:
-                    logger.error(f"Error using service account file: {e}")
+        return True, "Valid message"
 
-        # PRIORITY 2: Environment variable JSON
-        service_account_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
-        if service_account_json:
-            try:
-                logger.info("Using FIREBASE_SERVICE_ACCOUNT_JSON...")
-                service_account_info = self._parse_service_account_json(service_account_json)
-                if service_account_info and self._validate_service_account(service_account_info):
-                    return credentials.Certificate(service_account_info)
-            except Exception as e:
-                logger.error(f"Error processing FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+    @staticmethod
+    def validate_step_number(step: int) -> Tuple[bool, str]:
+        """Optimized step number validation"""
+        if not isinstance(step, int):
+            return False, "Step must be a number"
 
-        # PRIORITY 3: Individual environment variables
-        logger.info("Attempting individual environment variables...")
-        service_account_env = self._get_service_account_from_env()
-        if service_account_env:
-            try:
-                if self._validate_service_account(service_account_env):
-                    return credentials.Certificate(service_account_env)
-            except Exception as e:
-                logger.error(f"Error using environment variables: {e}")
+        if step < MIN_STEP or step > MAX_STEP:
+            return False, f"Step must be between {MIN_STEP} and {MAX_STEP}"
 
-        # PRIORITY 4: Default credentials
+        return True, "Valid step number"
+
+    @staticmethod
+    def sanitize_input(text: str) -> str:
+        """Optimized input sanitization"""
+        if not text:
+            return ""
+
+        # Quick whitespace cleanup
+        text = ' '.join(text.split())
+
+        # Remove HTML tags (optimized)
+        text = COMPILED_PATTERNS['html_tags'].sub('', text)
+
+        # Remove SQL injection attempts (optimized)
+        text_upper = text.upper()
+        for sql_word in DANGEROUS_SQL_WORDS:
+            text_upper = text_upper.replace(sql_word, '')
+        
+        return text.strip()
+
+    @staticmethod
+    def validate_user_id(user_id) -> Tuple[bool, str]:
+        """Optimized user ID validation"""
+        if not user_id:
+            return False, "User ID cannot be empty"
+
         try:
-            logger.info("Trying default credentials")
-            return credentials.ApplicationDefault()
-        except Exception as e:
-            logger.error(f"Error using default credentials: {e}")
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            return False, "User ID must be a number"
 
-        logger.error("All Firebase credential methods failed")
+        if user_id <= 0:
+            return False, "User ID must be positive"
+
+        if user_id < USER_ID_LIMITS['min_value'] or user_id > USER_ID_LIMITS['max_value']:
+            return False, "User ID appears to be invalid"
+
+        return True, "Valid user ID"
+
+    @staticmethod
+    def extract_referral_code_from_start_param(start_param: str) -> Optional[str]:
+        """Optimized referral code extraction"""
+        if not start_param:
+            return None
+
+        referral_code = start_param.strip()
+        
+        # Quick format check before full validation
+        if referral_code.startswith('REF') and len(referral_code) >= VALIDATION_LIMITS['referral_code_min_length']:
+            is_valid, _ = OptimizedValidators.validate_referral_code(referral_code)
+            if is_valid:
+                return referral_code
+
         return None
 
-    def _parse_service_account_json(self, json_string):
-        """Parse service account JSON with multiple fallback methods"""
-        try:
-            if json_string.startswith('{'):
-                return json.loads(json_string)
-        except json.JSONDecodeError:
-            pass
-
-        try:
-            import base64
-            decoded_json = base64.b64decode(json_string).decode('utf-8')
-            return json.loads(decoded_json)
-        except Exception:
-            pass
-
-        try:
-            import urllib.parse
-            decoded_json = urllib.parse.unquote(json_string)
-            return json.loads(decoded_json)
-        except Exception:
-            pass
-
-        return None
-
-    def _validate_service_account(self, service_account_info):
-        """Validate service account information"""
-        if not service_account_info:
+    @staticmethod
+    def is_valid_referral_link_param(param: str) -> bool:
+        """Quick referral parameter check"""
+        if not param:
             return False
-
-        required_fields = ['type', 'project_id', 'private_key', 'client_email']
-        missing_fields = [field for field in required_fields if not service_account_info.get(field)]
-        if missing_fields:
-            logger.error(f"Missing required fields: {missing_fields}")
-            return False
-
-        # Fix private key formatting
-        private_key = service_account_info.get('private_key', '')
-        if '\\n' in private_key:
-            private_key = private_key.replace('\\n', '\n')
-            service_account_info['private_key'] = private_key
-
-        if not private_key.startswith('-----BEGIN PRIVATE KEY-----'):
-            logger.error("Private key missing BEGIN marker")
-            return False
-
-        return True
-
-    def _get_service_account_from_env(self):
-        """Build service account dict from individual environment variables"""
-        service_account_info = {}
-        missing_vars = []
-
-        for key, env_var in FIREBASE_ENV_MAPPING.items():
-            value = os.getenv(env_var)
-            if value:
-                if key == 'private_key' and '\\n' in value:
-                    value = value.replace('\\n', '\n')
-                service_account_info[key] = value
-            elif key in FIREBASE_REQUIRED_VARS:
-                missing_vars.append(env_var)
-
-        if missing_vars:
-            return None
-
-        for key, default_value in FIREBASE_DEFAULTS.items():
-            service_account_info.setdefault(key, default_value)
-
-        return service_account_info
-
-    def _init_bot_stats(self):
-        """Initialize bot statistics document"""
-        try:
-            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
-            if not stats_doc.exists:
-                initial_stats = DEFAULT_BOT_STATS.copy()
-                initial_stats.update({
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now()
-                })
-                self.stats_collection.document(DB_COLLECTIONS['main_stats']).set(initial_stats)
-        except Exception as e:
-            logger.error(f"Error initializing bot stats: {e}")
-
-    # ========== CACHE METHODS ==========
-    def _cache_key(self, user_id: int) -> str:
-        """Generate cache key for user"""
-        return f"user:{user_id}"
-
-    def _is_cache_valid(self, key: str) -> bool:
-        """Check if cache entry is still valid"""
-        if key not in self._cache_ttl:
-            return False
-        return time.time() < self._cache_ttl[key]
-
-    def _cache_user(self, user_id: int, user_data: dict):
-        """Cache user data in memory"""
-        key = self._cache_key(user_id)
-        
-        # Implement LRU cache by removing oldest entries
-        if len(self._user_cache) >= self._cache_max_size:
-            oldest_key = min(self._cache_ttl.keys(), key=lambda k: self._cache_ttl[k])
-            del self._user_cache[oldest_key]
-            del self._cache_ttl[oldest_key]
-        
-        self._user_cache[key] = user_data.copy()
-        self._cache_ttl[key] = time.time() + self._cache_duration
-
-    def _get_cached_user(self, user_id: int) -> Optional[dict]:
-        """Get user from cache"""
-        key = self._cache_key(user_id)
-        if key in self._user_cache and self._is_cache_valid(key):
-            return self._user_cache[key].copy()
-        
-        # Remove expired entry
-        if key in self._user_cache:
-            del self._user_cache[key]
-            del self._cache_ttl[key]
-        
-        return None
-
-    def _invalidate_user_cache(self, user_id: int):
-        """Remove user from cache"""
-        key = self._cache_key(user_id)
-        if key in self._user_cache:
-            del self._user_cache[key]
-            del self._cache_ttl[key]
-
-    # ========== OPTIMIZED DATABASE METHODS ==========
-    async def get_user_with_retry(self, user_id: int, max_retries: int = 2) -> Optional[Dict]:
-        """Enhanced get_user with caching and reduced retries"""
-        # Check cache first
-        cached_user = self._get_cached_user(user_id)
-        if cached_user:
-            return cached_user
-
-        if self._circuit_breaker_open:
-            if time.time() - self._last_failure_time > self._circuit_breaker_timeout:
-                self._circuit_breaker_open = False
-                self._connection_failures = 0
-            else:
-                logger.warning(f"Circuit breaker open - returning None for user {user_id}")
-                return None
-
-        for attempt in range(max_retries):
-            try:
-                # Use thread executor for non-blocking database operations
-                loop = asyncio.get_event_loop()
-                user_doc = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self.users_collection.document(str(user_id)).get()
-                )
-                
-                if user_doc.exists:
-                    user_data = user_doc.to_dict()
-                    user_data['_id'] = user_id
-                    
-                    # Cache the result
-                    self._cache_user(user_id, user_data)
-                    
-                    self._connection_failures = 0
-                    return user_data
-                else:
-                    self._connection_failures = 0
-                    return None
-
-            except Exception as e:
-                logger.warning(f"get_user attempt {attempt + 1} failed for user {user_id}: {e}")
-                self._connection_failures += 1
-                
-                if self._connection_failures >= self._circuit_breaker_threshold:
-                    self._circuit_breaker_open = True
-                    self._last_failure_time = time.time()
-                
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5 * (attempt + 1))  # Reduced delay
-
-        return None
-
-    async def create_user_with_retry(self, user_id: int, username: str, first_name: str, referred_by: str = None, max_retries: int = 2) -> bool:
-        """Optimized create_user with reduced retries"""
-        if self._circuit_breaker_open:
-            return False
-
-        for attempt in range(max_retries):
-            try:
-                # Check cache first
-                existing_user = self._get_cached_user(user_id)
-                if existing_user:
-                    return True
-
-                # Quick existence check
-                loop = asyncio.get_event_loop()
-                existing_check = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self.users_collection.document(str(user_id)).get()
-                )
-                
-                if existing_check.exists:
-                    # Cache the existing user
-                    existing_data = existing_check.to_dict()
-                    existing_data['_id'] = user_id
-                    self._cache_user(user_id, existing_data)
-                    return True
-
-                # Create new user
-                user_data = DEFAULT_USER_DATA.copy()
-                referral_code = self._generate_unique_referral_code()
-
-                user_data.update({
-                    "user_id": user_id,
-                    "username": username,
-                    "first_name": first_name,
-                    "referral_code": referral_code,
-                    "referred_by": referred_by,
-                    "is_referred": bool(referred_by),
-                    "created_at": datetime.now(),
-                    "updated_at": datetime.now()
-                })
-
-                # Create user document
-                await loop.run_in_executor(
-                    self._executor,
-                    lambda: self.users_collection.document(str(user_id)).set(user_data)
-                )
-
-                # Cache the new user
-                self._cache_user(user_id, user_data)
-                
-                # Update stats asynchronously
-                asyncio.create_task(self._update_stats_async('user_created'))
-                
-                self._connection_failures = 0
-                return True
-
-            except Exception as e:
-                logger.warning(f"create_user attempt {attempt + 1} failed for user {user_id}: {e}")
-                self._connection_failures += 1
-                
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5 * (attempt + 1))
-
-        return False
-
-    def _generate_unique_referral_code(self) -> str:
-        """Generate referral code (simplified for performance)"""
-        return generate_referral_code()
-
-    async def update_user_step(self, user_id: int, step: int, completed: bool = True) -> bool:
-        """Optimized update_user_step"""
-        try:
-            from constants import TOTAL_STEPS
-            
-            update_data = {
-                "current_step": step + 1 if completed else step,
-                f"steps_completed.step_{step}": completed,
-                "updated_at": datetime.now()
-            }
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: self.users_collection.document(str(user_id)).update(update_data)
-            )
-
-            # Invalidate cache
-            self._invalidate_user_cache(user_id)
-
-            # Handle completion logic
-            if step == TOTAL_STEPS and completed:
-                asyncio.create_task(self._handle_completion_async(user_id))
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error updating user {user_id} step {step}: {e}")
-            return False
-
-    async def _handle_completion_async(self, user_id: int):
-        """Handle completion logic asynchronously"""
-        try:
-            user_data = await self.get_user_with_retry(user_id)
-            if user_data:
-                # Calculate MNTC
-                mntc_earned = self._calculate_mntc_earned(user_data)
-                
-                # Store completion data
-                completion_data = {
-                    "mntc_earned": mntc_earned,
-                    "reward_type": "referred" if user_data.get('is_referred') else "normal",
-                    "completion_date": datetime.now(),
-                    "reward_status": "pending"
-                }
-
-                update_data = {
-                    "reward_info": completion_data,
-                    "updated_at": datetime.now()
-                }
-
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    self._executor,
-                    lambda: self.users_collection.document(str(user_id)).update(update_data)
-                )
-
-                # Update stats
-                await self._update_stats_async('user_completed')
-                
-                # Handle referral
-                if user_data.get('referred_by'):
-                    await self._handle_referral_completion_async(user_data['referred_by'], user_id)
-
-        except Exception as e:
-            logger.error(f"Error handling completion for user {user_id}: {e}")
-
-    def _calculate_mntc_earned(self, user_data: dict) -> int:
-        """Calculate MNTC earned"""
-        is_referred = user_data.get('is_referred', False)
-        return REFERRAL_CONFIG['referred_reward'] if is_referred else REFERRAL_CONFIG['normal_reward']
-
-    async def _handle_referral_completion_async(self, referrer_code: str, referred_user_id: int):
-        """Handle referral completion asynchronously"""
-        try:
-            referrer = await self.get_user_by_referral_code_async(referrer_code)
-            if referrer:
-                referrer_id = referrer['user_id']
-                current_referrals = referrer.get('referral_stats', {}).get('total_referrals', 0)
-                
-                update_data = {
-                    "referral_stats.total_referrals": current_referrals + 1,
-                    "updated_at": datetime.now()
-                }
-
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    self._executor,
-                    lambda: self.users_collection.document(str(referrer_id)).update(update_data)
-                )
-                
-                # Invalidate referrer cache
-                self._invalidate_user_cache(referrer_id)
-
-        except Exception as e:
-            logger.error(f"Error handling referral completion: {e}")
-
-    async def get_user_by_referral_code_async(self, referral_code: str) -> Optional[Dict]:
-        """Async version of get_user_by_referral_code"""
-        try:
-            loop = asyncio.get_event_loop()
-            query = self.users_collection.where('referral_code', '==', referral_code).limit(1)
-            docs = await loop.run_in_executor(self._executor, lambda: list(query.stream()))
-            
-            for doc in docs:
-                user_data = doc.to_dict()
-                user_data['_id'] = doc.id
-                return user_data
-            
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user by referral code {referral_code}: {e}")
-            return None
-
-    async def save_social_username(self, user_id: int, platform: str, username: str) -> bool:
-        """Optimized save_social_username"""
-        try:
-            update_data = {
-                f"social_usernames.{platform}": username,
-                f"verification_status.{platform}": True,
-                "updated_at": datetime.now()
-            }
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: self.users_collection.document(str(user_id)).update(update_data)
-            )
-
-            # Invalidate cache
-            self._invalidate_user_cache(user_id)
-            return True
-
-        except Exception as e:
-            logger.error(f"Error saving {platform} username for user {user_id}: {e}")
-            return False
-
-    async def save_bep20_address(self, user_id: int, address: str) -> bool:
-        """Optimized save_bep20_address"""
-        try:
-            update_data = {
-                "bep20_address": address,
-                "updated_at": datetime.now()
-            }
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: self.users_collection.document(str(user_id)).update(update_data)
-            )
-
-            # Invalidate cache
-            self._invalidate_user_cache(user_id)
-            return True
-
-        except Exception as e:
-            logger.error(f"Error saving BEP20 address for user {user_id}: {e}")
-            return False
-
-    async def _update_stats_async(self, action: str):
-        """Update bot statistics asynchronously"""
-        try:
-            stats_ref = self.stats_collection.document(DB_COLLECTIONS['main_stats'])
-            loop = asyncio.get_event_loop()
-            
-            if action == 'user_created':
-                await loop.run_in_executor(
-                    self._executor,
-                    lambda: stats_ref.update({
-                        'total_users': firestore.Increment(1),
-                        'updated_at': datetime.now()
-                    })
-                )
-            elif action == 'user_completed':
-                await loop.run_in_executor(
-                    self._executor,
-                    lambda: stats_ref.update({
-                        'completed_users': firestore.Increment(1),
-                        'updated_at': datetime.now()
-                    })
-                )
-
-        except Exception as e:
-            logger.error(f"Error updating stats for action {action}: {e}")
-
-    def get_user_stats(self) -> Dict:
-        """Get bot statistics (synchronous for compatibility)"""
-        try:
-            stats_doc = self.stats_collection.document(DB_COLLECTIONS['main_stats']).get()
-            if stats_doc.exists:
-                return stats_doc.to_dict()
-            else:
-                return DEFAULT_BOT_STATS.copy()
-        except Exception as e:
-            logger.error(f"Error getting stats: {e}")
-            return DEFAULT_BOT_STATS.copy()
-
-    def get_user_by_referral_code(self, referral_code: str) -> Optional[Dict]:
-        """Synchronous version for compatibility"""
-        try:
-            query = self.users_collection.where('referral_code', '==', referral_code).limit(1)
-            docs = query.stream()
-            for doc in docs:
-                user_data = doc.to_dict()
-                user_data['_id'] = doc.id
-                return user_data
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user by referral code {referral_code}: {e}")
-            return None
-
-    def get_user(self, user_id: int) -> Optional[Dict]:
-        """Synchronous wrapper for compatibility"""
-        # Check cache first
-        cached_user = self._get_cached_user(user_id)
-        if cached_user:
-            return cached_user
-
-        try:
-            user_doc = self.users_collection.document(str(user_id)).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                user_data['_id'] = user_id
-                self._cache_user(user_id, user_data)
-                return user_data
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user {user_id}: {e}")
-            return None
-
-    def create_user(self, user_id: int, username: str, first_name: str, referred_by: str = None) -> bool:
-        """Synchronous wrapper for compatibility"""
-        try:
-            # Quick check
-            existing_user = self._get_cached_user(user_id)
-            if existing_user:
-                return True
-
-            existing_check = self.users_collection.document(str(user_id)).get()
-            if existing_check.exists:
-                existing_data = existing_check.to_dict()
-                existing_data['_id'] = user_id
-                self._cache_user(user_id, existing_data)
-                return True
-
-            # Create new user
-            user_data = DEFAULT_USER_DATA.copy()
-            referral_code = self._generate_unique_referral_code()
-
-            user_data.update({
-                "user_id": user_id,
-                "username": username,
-                "first_name": first_name,
-                "referral_code": referral_code,
-                "referred_by": referred_by,
-                "is_referred": bool(referred_by),
-                "created_at": datetime.now(),
-                "updated_at": datetime.now()
-            })
-
-            self.users_collection.document(str(user_id)).set(user_data)
-            self._cache_user(user_id, user_data)
-            
-            return True
-
-        except Exception as e:
-            logger.error(f"Error creating user {user_id}: {e}")
-            return False
-
-    def close_connection(self):
-        """Close database connection"""
-        if hasattr(self, '_executor'):
-            self._executor.shutdown(wait=False)
-        logger.info("Database connection closed")
+        return param.startswith('REF') and len(param) >= VALIDATION_LIMITS['referral_code_min_length']
+
+    @classmethod
+    def get_validation_summary(cls) -> dict:
+        """Get validation rules summary"""
+        return VALIDATION_SUMMARY
 
 # For backward compatibility
-Database = OptimizedDatabase
+Validators = OptimizedValidators
