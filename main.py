@@ -1292,6 +1292,7 @@ Use the buttons below for instant access to our platforms
             logger.error(f"❌ Bot cleanup failed: {e}")
             raise
 
+    
     async def start_bot(self):
         """Start the bot with enhanced conflict resolution and performance monitoring"""
         try:
@@ -1345,13 +1346,10 @@ Use the buttons below for instant access to our platforms
 
             # Start polling with enhanced error handling
             try:
+                # Removed unsupported timeout parameters here:
                 await self.application.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True,  # Drop pending updates to avoid conflicts
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=30,
-                    pool_timeout=30
+                    drop_pending_updates=True
                 )
 
                 logger.info(f"{EMOJIS['checkmark']} Bot started successfully!")
@@ -1360,7 +1358,6 @@ Use the buttons below for instant access to our platforms
 
                 # Start performance monitoring task
                 asyncio.create_task(self.performance_monitor())
-                
                 # Start cache optimization task
                 asyncio.create_task(self.cache_optimizer())
 
@@ -1392,6 +1389,7 @@ Use the buttons below for instant access to our platforms
         finally:
             if self.application:
                 await self.stop_bot()
+
 
     async def performance_monitor(self):
         """Background task to monitor and log performance metrics"""
@@ -1528,4 +1526,5 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"{EMOJIS['cross']} Fatal startup error: {e}")
         sys.exit(1)
+
 
