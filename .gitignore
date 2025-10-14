@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Firebase
+firebase-service-account.json
+config/firebase-service-account.json
+*.json.backup
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Backup files
+*_backup_*.py
+*.bak
+*.backup
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Firebase Cache
+.firebase/
+.firebaserc.local
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Node (if using Firebase CLI)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Render specific
+.render/
+
+# Database dumps
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets
+secrets/
+*.key
+*.pem

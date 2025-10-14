@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default: Deny all access (only allow via service account)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Note: Your bot uses Firebase Admin SDK with service account
+    // which bypasses these rules. These rules are for client access only.
+
+    // If you ever need client access, uncomment and customize:
+    // match /users/{userId} {
+    //   allow read: if request.auth != null && request.auth.uid == userId;
+    //   allow write: if false; // Only bot can write
+    // }
+  }
+}
