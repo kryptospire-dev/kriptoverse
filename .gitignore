@@ -1,3 +1,13 @@
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Firebase credentials
+*.json
+!package.json
+!package-lock.json
+
 # Python
 __pycache__/
 *.py[cod]
@@ -16,29 +26,15 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
 # Virtual Environment
 venv/
-env/
 ENV/
-env.bak/
-venv.bak/
-
-# Environment Variables
-.env
-.env.local
-.env.*.local
-
-# Firebase
-firebase-service-account.json
-config/firebase-service-account.json
-*.json.backup
+env/
+.venv
 
 # IDE
 .vscode/
@@ -46,7 +42,10 @@ config/firebase-service-account.json
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Logs
 *.log
@@ -56,42 +55,7 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
-.tox/
-.nox/
-
-# Backup files
-*_backup_*.py
-*.bak
-*.backup
 
 # Temporary files
 *.tmp
-*.temp
-.cache/
-
-# Firebase Cache
-.firebase/
-.firebaserc.local
-
-# OS
-Thumbs.db
-.DS_Store
-desktop.ini
-
-# Node (if using Firebase CLI)
-node_modules/
-package-lock.json
-yarn.lock
-
-# Render specific
-.render/
-
-# Database dumps
-*.db
-*.sqlite
-*.sqlite3
-
-# Secrets
-secrets/
-*.key
-*.pem
+temp/

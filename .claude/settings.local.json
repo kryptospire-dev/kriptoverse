@@ -1,8 +1,20 @@
 {
   "permissions": {
     "allow": [
+      "Bash(pip install:*)",
       "Bash(python:*)",
-      "Bash(awk:*)"
+      "Bash(timeout 10 python:*)",
+      "Bash(timeout 15 python:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npx create-next-app:*)",
+      "Bash(npx create-next-app@latest admin-panel --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --yes)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(node:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

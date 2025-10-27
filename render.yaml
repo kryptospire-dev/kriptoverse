@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: mntc-rewards-bot
+    env: python
+    region: oregon  # Choose: oregon, frankfurt, singapore
+    plan: starter  # Use starter or higher for better performance
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+
+    # Health check configuration
+    healthCheckPath: /health
+
+    # Auto-scaling (available on Pro plan and above)
+    # numInstances: 2
+    # maxInstances: 10
+
+    # Environment variables
+    envVars:
+      # Required - Set in Render dashboard
+      - key: BOT_TOKEN
+        sync: false
+      - key: FIREBASE_DB_URL
+        sync: false
+      - key: FIREBASE_CREDENTIALS
+        sync: false
+
+      # Channel configuration
+      - key: MINATI_CHANNEL
+        value: "@Minatirewards"
+      - key: MINATI_CHANNEL_ID
+        value: "-1002975509146"
+
+      # Performance settings - OPTIMIZED FOR HIGH LOAD
+      - key: CONNECTION_POOL_SIZE
+        value: "32"
+      - key: MAX_CONCURRENT_UPDATES
+        value: "100"
+      - key: REQUEST_TIMEOUT
+        value: "30"
+      - key: CACHE_TTL
+        value: "300"
+
+      # Webhook configuration (recommended for production)
+      - key: WEBHOOK_ENABLED
+        value: "false"  # Set to true when using webhooks
+      - key: WEBHOOK_URL
+        value: ""  # Set to your render URL: https://your-app.onrender.com
+      - key: WEBHOOK_PATH
+        value: "/webhook"
+      - key: WEBHOOK_PORT
+        value: "8443"
+
+      # Redis configuration (recommended for multi-instance deployments)
+      - key: REDIS_ENABLED
+        value: "false"  # Set to true when using Redis
+      - key: REDIS_URL
+        value: ""  # Set to your Redis URL
+
+      # Metrics port
+      - key: METRICS_PORT
+        value: "8000"
+
+# Optional: Add Redis service (recommended for production)
+# - type: redis
+#   name: mntc-bot-redis
+#   plan: starter
+#   maxmemoryPolicy: allkeys-lru
+#   ipAllowList: []
